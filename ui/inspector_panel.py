@@ -16,7 +16,23 @@ class InspectorPanel(QFrame):
         self.stack = QStackedWidget(); root.addWidget(self.stack, 1); self.empty_page = self._empty_page(); self.stack.addWidget(self.empty_page); self.pages = {}
         for kind in self.KINDS:
             page = self._make_page(kind); self.pages[kind] = page; self.stack.addWidget(page)
+        self._disable_unavailable_controls()
         if selection_manager is not None: selection_manager.selectionChanged.connect(self.set_selection)
+
+    def _disable_unavailable_controls(self):
+        unavailable = {
+            "video": ("x", "y", "scale", "rotation", "opacity", "fit_mode"),
+            "audio": ("fade_in", "fade_out"),
+            "text": ("bold", "italic", "underline", "alignment", "scale", "rotation", "stroke_width", "stroke_color", "background", "shadow", "shadow_blur", "shadow_x", "shadow_y", "character_spacing", "line_spacing"),
+            "subtitle": ("underline", "alignment", "scale", "rotation", "opacity", "shadow_blur", "shadow_x", "shadow_y", "character_spacing", "line_spacing"),
+        }
+        for kind, keys in unavailable.items():
+            for key in keys:
+                widget = self._controls.get((kind, key))
+                if widget is not None:
+                    widget.setEnabled(False)
+                    widget.setToolTip("Coming next — not yet supported by Preview and export")
+                    widget.setStatusTip("Coming next")
 
     def _empty_page(self):
         page = QWidget(); layout = QVBoxLayout(page); layout.addStretch(1)
@@ -27,6 +43,9 @@ class InspectorPanel(QFrame):
     def _make_page(self, kind):
         scroll = QScrollArea(); scroll.setWidgetResizable(True); body = QWidget(); form = QFormLayout(body)
         heading = QLabel("Image / Logo" if kind in ("image", "logo") else kind.title()); heading.setObjectName("inspectorHeading"); form.addRow(heading)
+        if kind in ("video", "audio", "text", "subtitle"):
+            notice = QLabel("Disabled controls are Coming next and do not affect the project.")
+            notice.setObjectName("hint"); notice.setWordWrap(True); form.addRow(notice)
         if kind in ("text", "subtitle"):
             content = QTextEdit(); content.setMaximumHeight(80); self._bind(kind, "text", content, "textChanged", lambda w: w.toPlainText()); form.addRow("Content", content)
             font = QFontComboBox(); self._bind(kind, "font_name", font, "currentFontChanged", lambda w: w.currentFont().family()); form.addRow("Font", font)

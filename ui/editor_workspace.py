@@ -13,10 +13,13 @@ class EditorWorkspace(QWidget):
         left = QFrame(); left.setObjectName("leftWorkspace"); left.setMinimumWidth(240); left_layout = QHBoxLayout(left); left_layout.setContentsMargins(0, 0, 0, 0); left_layout.setSpacing(0)
         nav = QFrame(); nav.setObjectName("toolNav"); nav_layout = QVBoxLayout(nav); nav_layout.setContentsMargins(5, 8, 5, 8); nav_layout.setSpacing(4)
         self.page_stack = QStackedWidget(); self.page_stack.setMinimumWidth(176)
+        self._tool_indexes = {key: index for index, key in enumerate(pages)}
+        self._tool_buttons = {}
         for page in pages.values(): self.page_stack.addWidget(page)
         group = QButtonGroup(self); group.setExclusive(True)
-        for index, (_, icon, label) in enumerate(self.TOOLS):
+        for index, (key, icon, label) in enumerate(self.TOOLS):
             button = QPushButton(f"{icon}\n{label}"); button.setObjectName("toolButton"); button.setCheckable(True); button.setFixedSize(58, 58); button.clicked.connect(lambda checked=False, i=index: self.page_stack.setCurrentIndex(i)); group.addButton(button); nav_layout.addWidget(button)
+            self._tool_buttons[key] = button
             if index == 0: button.setChecked(True)
         nav_layout.addStretch(1); left_layout.addWidget(nav); left_layout.addWidget(self.page_stack, 1)
         preview.setMinimumWidth(420); inspector.setMinimumWidth(280); timeline.setMinimumHeight(180)
@@ -26,6 +29,12 @@ class EditorWorkspace(QWidget):
         self.horizontal_splitter.splitterMoved.connect(lambda *_: self.splitterSizesChanged.emit()); self.vertical_splitter.splitterMoved.connect(lambda *_: self.splitterSizesChanged.emit()); root.addWidget(self.vertical_splitter)
 
     def sizes(self): return {"workspace_horizontal": self.horizontal_splitter.sizes(), "workspace_vertical": self.vertical_splitter.sizes()}
+    def set_tool(self, key):
+        """Switch left tools through the workspace's stable public API."""
+        if key not in self._tool_indexes: return False
+        self.page_stack.setCurrentIndex(self._tool_indexes[key])
+        self._tool_buttons[key].setChecked(True)
+        return True
     def restore_sizes(self, values):
         if values.get("workspace_horizontal"): self.horizontal_splitter.setSizes(values["workspace_horizontal"])
         if values.get("workspace_vertical"): self.vertical_splitter.setSizes(values["workspace_vertical"])

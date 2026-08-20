@@ -39,6 +39,9 @@ def normalize_clip(clip: dict) -> dict:
         float(c.get("source_end", c["source_start"] + 0.05) or 0.0),
     )
     c["enabled"] = bool(c.get("enabled", True))
+    c["locked"] = bool(c.get("locked", False))
+    c["muted"] = bool(c.get("muted", False))
+    c["volume"] = max(0.0, min(200.0, float(c.get("volume", 100.0) or 0.0)))
     c["id"] = str(c.get("id", "") or _clip_id(path))
     return c
 
@@ -62,6 +65,9 @@ def make_clip(path: str) -> dict:
         "source_end": duration,
         "source_duration": duration,
         "enabled": True,
+        "locked": False,
+        "muted": False,
+        "volume": 100.0,
     }
 
 
@@ -220,13 +226,14 @@ def render_timeline(
             f"[v{i}]"
         )
 
-        if info.get("has_audio"):
+        if info.get("has_audio") and not clip.get("muted", False):
             filters.append(
                 f"[{i}:a]"
                 f"atrim=start={start:.6f}:end={end:.6f},"
                 "asetpts=PTS-STARTPTS,"
                 "aresample=48000,"
-                "aformat=sample_fmts=fltp:channel_layouts=stereo"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"volume={max(0.0, min(2.0, float(clip.get('volume', 100) or 0) / 100.0)):.3f}"
                 f"[a{i}]"
             )
         else:

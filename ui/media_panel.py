@@ -10,12 +10,12 @@ class MediaCard(QFrame):
     selected = Signal(str)
     addRequested = Signal(str)
 
-    def __init__(self, path: str, duration: float = 0.0, parent=None):
+    def __init__(self, path: str, duration: float = 0.0, thumbnail_path: str = "", parent=None):
         super().__init__(parent); self.path = str(path); self._press_pos = None
         self.setObjectName("mediaCard"); self.setCursor(Qt.PointingHandCursor); self.setMinimumHeight(78)
         row = QHBoxLayout(self); row.setContentsMargins(7, 7, 7, 7)
         thumb = QLabel("▶"); thumb.setObjectName("mediaThumb"); thumb.setAlignment(Qt.AlignCenter); thumb.setFixedSize(74, 54)
-        pixmap = QPixmap(self.path)
+        pixmap = QPixmap(thumbnail_path)
         if not pixmap.isNull(): thumb.setPixmap(pixmap.scaled(74, 54, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         row.addWidget(thumb)
         text = QVBoxLayout(); name = QLabel(Path(self.path).name); name.setWordWrap(True); name.setObjectName("mediaName"); text.addWidget(name)
@@ -42,7 +42,7 @@ class MediaPanel(QWidget):
     mediaSelected = Signal(str)
 
     def __init__(self, parent=None):
-        super().__init__(parent); self.setObjectName("toolPage"); self.setMinimumWidth(240); self._paths = []
+        super().__init__(parent); self.setObjectName("toolPage"); self.setMinimumWidth(240); self._paths = []; self._metadata = {}
         layout = QVBoxLayout(self); layout.setContentsMargins(10, 10, 10, 10)
         title = QLabel("Media"); title.setObjectName("panelTitle"); layout.addWidget(title)
         self.drop_area = QFrame(); self.drop_area.setObjectName("mediaDropArea"); drop = QVBoxLayout(self.drop_area); drop.addStretch(1)
@@ -55,6 +55,9 @@ class MediaPanel(QWidget):
     def set_media(self, paths: list[str]) -> None:
         self._paths = list(dict.fromkeys(str(path) for path in paths if path)); self._render()
 
+    def update_media_info(self, path: str, thumbnail_path: str, duration: float) -> None:
+        self._metadata[str(path)] = (str(thumbnail_path), float(duration)); self._render()
+
     def _render(self) -> None:
         while self.card_layout.count():
             item = self.card_layout.takeAt(0)
@@ -62,5 +65,6 @@ class MediaPanel(QWidget):
         query = self.search.text().strip().lower()
         for path in self._paths:
             if query and query not in Path(path).name.lower(): continue
-            card = MediaCard(path); card.selected.connect(self.mediaSelected); card.addRequested.connect(self.mediaAddRequested); self.card_layout.addWidget(card)
+            thumbnail, duration = self._metadata.get(path, ("", 0.0))
+            card = MediaCard(path, duration, thumbnail); card.selected.connect(self.mediaSelected); card.addRequested.connect(self.mediaAddRequested); self.card_layout.addWidget(card)
         self.card_layout.addStretch(1); self.drop_area.setVisible(not self._paths)

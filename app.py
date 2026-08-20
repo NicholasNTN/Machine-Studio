@@ -46,7 +46,9 @@ from ui.inspector_panel import InspectorPanel
 from ui.media_panel import MediaPanel
 from ui.tool_panels import ActionListPanel
 from services.preview_service import PreviewService
+from services.thumbnail_service import ThumbnailService
 from editor.timeline_item import TimelineItem, TimelineItemKind
+from editor.subtitle_group import SubtitleGroupStyle
 
 
 APP_NAME = "Machine Studio"
@@ -544,10 +546,14 @@ class MainWindow(QMainWindow):
         self._active_workers: list[Worker] = []
         self._restoring_state = False
         self._source_aspect_cache = {}
+        self._source_geometry_cache = {}
+        self._aspect_probe_inflight = set()
+        self._last_valid_source_aspect = 16 / 9
         self.stop_requested = False
         self.process_holder = {"process": None}
         self.editor_document = EditorDocument(self)
         self.preview_service = PreviewService()
+        self.thumbnail_service = ThumbnailService(ROOT / ".cache" / "thumbnails", self)
 
         self.narration_path = ""
         self.accompaniment_path = ""
@@ -715,6 +721,7 @@ class MainWindow(QMainWindow):
         self.media_panel.mediaAddRequested.connect(
             lambda path: self.editor_add_paths([path])
         )
+        self.thumbnail_service.ready.connect(self.media_panel.update_media_info)
         self.audio_tool_panel.primaryRequested.connect(self.choose_music_file)
         self.audio_tool_panel.secondaryRequested.connect(self._choose_audio_file)
         self.text_tool_panel.primaryRequested.connect(self.editor_add_text_layer)
@@ -766,6 +773,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "media_panel"):
             return
         self.media_panel.set_media(self.queue)
+        for path in self.queue:
+            self.thumbnail_service.request(path)
         audio = []
         for label, path in (("Background", self.music_file.text().strip()), ("AI narration", self.narration_path)):
             if path: audio.append(f"{label}: {Path(path).name}")
@@ -797,6 +806,9 @@ class MainWindow(QMainWindow):
             if item is not None:
                 item[key] = value
                 if key == "muted": item["muted"] = bool(value)
+                if key in ("volume", "muted"):
+                    volume = 0.0 if item.get("muted", False) else max(0.0, min(1.0, float(item.get("volume", 100)) / 100.0))
+                    self.audio_output.setVolume(volume)
         elif selection.kind in ("text", "image", "logo"):
             layer = next((layer for layer in self.editor_layers if layer.get("id") == selection.object_id), None)
             if layer is not None:
@@ -811,18 +823,38 @@ class MainWindow(QMainWindow):
                 widget_map = {"x": self.logo_x, "y": self.logo_y, "scale": self.logo_scale, "opacity": self.logo_opacity}
                 if key in widget_map: widget_map[key].setValue(value)
         elif selection.kind == "subtitle":
-            if key == "font_size": self.sub_size.setValue(int(value))
-            elif key == "font_name": self.sub_font.setCurrentFont(QFont(str(value)))
-            elif key == "text": return
+            mapping = {
+                "font_size": (self.sub_size, lambda v: int(v)),
+                "font_name": (self.sub_font, lambda v: QFont(str(v))),
+                "bold": (self.sub_bold, bool),
+                "italic": (self.sub_italic, bool),
+                "color": (self.sub_color, str),
+                "stroke_color": (self.sub_outline_color, str),
+                "stroke_width": (self.sub_outline, float),
+                "shadow": (self.sub_shadow, lambda v: 1.0 if v else 0.0),
+                "background": (self.sub_bg_color, str),
+                "x": (self.sub_x, float),
+                "y": (self.sub_y, float),
+            }
+            if key == "text": return
+            if key in mapping:
+                widget, convert = mapping[key]
+                converted = convert(value)
+                if isinstance(widget, QFontComboBox): widget.setCurrentFont(converted)
+                elif isinstance(widget, (QLineEdit,)): widget.setText(converted)
+                elif isinstance(widget, QCheckBox): widget.setChecked(converted)
+                else: widget.setValue(converted)
         elif selection.kind == "blur":
             if key in ("strength", "opacity"): self.blur_opacity.setValue(int(value))
         self.editor_document.synchronize_legacy_items()
+        if selection.kind == "subtitle":
+            self._synchronize_supplemental_timeline_items()
+            self.editor_timeline.set_timeline_items(self.editor_document.timeline.items)
         self.update_live_overlay_state(); self.schedule_autosave()
 
     def _open_top_section(self, section):
         index_by_section = {
             "editor": 0,
-            "voiceover": 1,
             "ai": 2,
             "download": 3,
             "settings": 4,
@@ -830,17 +862,26 @@ class MainWindow(QMainWindow):
         if section == "menu":
             self.status("Machine Studio v1.1.0 PRO FOUNDATION")
             return
+        if section == "voiceover":
+            self.tabs.setCurrentIndex(0)
+            self.video_editor_tab.set_tool("audio")
+            self.top_bar.set_active(section)
+            self.status("Voiceover and audio tools")
+            return
         index = index_by_section.get(section)
         if index is not None:
             self.tabs.setCurrentIndex(index)
             self.top_bar.set_active(section)
-            if section == "voiceover":
-                self.status("Voiceover tools are available in the Video Editor audio panel.")
 
     def _top_export(self):
         self.tabs.setCurrentIndex(1)
-        self.top_bar.set_active("editor")
-        self.export_batch()
+        if hasattr(self, "export_review_label"):
+            self.export_review_label.setText(
+                f"Canvas: {self.editor_document.aspect_ratio}  •  "
+                f"Audio: {'AI voice ready' if self.narration_path else 'source audio'}  •  "
+                f"Subtitles: {'ready' if self.sub_path.text().strip() else 'none'}"
+            )
+        self.status("Review export settings, then click Export Video to render.")
 
     # ------------------------------------------------------------------
     # VIDEO EXPORTER
@@ -848,6 +889,10 @@ class MainWindow(QMainWindow):
     def _build_export_tab(self):
         root = QVBoxLayout(self.export_tab)
         root.setSpacing(5)
+
+        self.export_review_label = QLabel("Review output, canvas, codec, audio and subtitle settings before exporting.")
+        self.export_review_label.setObjectName("exportReview")
+        root.addWidget(self.export_review_label)
 
         # 1. XUẤT VIDEO / BATCH — visually close to reference.
         batch = QGroupBox("Xuất Hàng Loạt")
@@ -1775,19 +1820,15 @@ class MainWindow(QMainWindow):
         rl.addStretch(1)
 
         body.addWidget(left_scroll)
-        body.addWidget(center)
         body.addWidget(right_scroll)
-        body.setSizes([355, 880, 470])
+        body.setSizes([520, 620])
         body.setStretchFactor(0, 1)
-        body.setStretchFactor(1, 3)
-        body.setStretchFactor(2, 1)
+        body.setStretchFactor(1, 1)
 
         # Collapsible CapCut-like basic timeline editor lives in the same
         # vertical splitter so both regions can be resized with the mouse.
-        self._build_basic_editor_panel(self.export_vertical_splitter)
-        self.export_vertical_splitter.setStretchFactor(0, 4)
-        self.export_vertical_splitter.setStretchFactor(1, 2)
-        self.export_vertical_splitter.setSizes([760, 300])
+        self._build_basic_editor_panel(None)
+        self.export_vertical_splitter.setStretchFactor(0, 1)
 
         # Persist UI split sizes with the project without forcing a layout.
         body.splitterMoved.connect(lambda *_: self.schedule_autosave())
@@ -1971,6 +2012,7 @@ class MainWindow(QMainWindow):
         )
         self.editor_timeline.itemSelected.connect(self._timeline_item_selected)
         self.editor_timeline.trackStateChanged.connect(self._timeline_track_state_changed)
+        self.editor_timeline.mediaDropped.connect(self._timeline_media_dropped)
 
         zoom_box = QVBoxLayout()
         zoom_box.addWidget(QLabel("Zoom"))
@@ -2169,7 +2211,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(note)
 
         self.editor_panel.setVisible(False)
-        parent_layout.addWidget(self.editor_panel)
+        if parent_layout is not None:
+            parent_layout.addWidget(self.editor_panel)
 
     def toggle_basic_editor(self, checked):
         checked = bool(checked)
@@ -2287,9 +2330,15 @@ class MainWindow(QMainWindow):
         if self.preview_cues:
             track = self.editor_document.timeline.track_for_kind(TimelineItemKind.SUBTITLE)
             group = self._current_subtitle_group_id()
+            segment_ids = []
             for index, cue in enumerate(self.preview_cues):
                 start, end, text = cue[:3]
-                items.append(TimelineItem(TimelineItemKind.SUBTITLE, track.id, float(start), float(end), id=f"{group}:{index}", group_id=group, metadata={"text": text, "font_size": self.sub_size.value()}))
+                segment_id = f"{group}:{index}"
+                segment_ids.append(segment_id)
+                items.append(TimelineItem(TimelineItemKind.SUBTITLE, track.id, float(start), float(end), id=segment_id, group_id=group, metadata={"text": text, "font_size": self.sub_size.value()}))
+            subtitle_group = self.editor_document.subtitle_groups.get(group)
+            if subtitle_group is not None:
+                subtitle_group.segment_ids[:] = segment_ids
         audio_path = self.narration_path or (self.voice_file.text().strip() if hasattr(self, "voice_file") else "")
         if audio_path:
             track = self.editor_document.timeline.track_for_kind(TimelineItemKind.AUDIO)
@@ -2310,7 +2359,33 @@ class MainWindow(QMainWindow):
             if field == "locked": item.metadata["locked"] = bool(value)
             elif field == "visible": item.metadata["enabled"] = bool(value)
             elif field == "muted": item.metadata["muted"] = bool(value)
+        kind = track.kind.value
+        if kind == "audio" and field == "muted":
+            if value:
+                self._audio_track_volume_before_mute = self.narration_volume.value()
+                self.narration_volume.setValue(0)
+            else:
+                self.narration_volume.setValue(getattr(self, "_audio_track_volume_before_mute", 100))
+        elif field == "visible":
+            if kind == "subtitle": self.sub_enabled.setChecked(bool(value))
+            elif kind == "effect": self.blur_enabled.setChecked(bool(value))
         self.update_live_overlay_state(); self.schedule_autosave()
+
+    def _timeline_media_dropped(self, path, global_time, track_kind):
+        if track_kind != "video":
+            self.status("Drop video media on the Video track.")
+            return
+        worker = Worker(lambda progress, log: editor_engine.make_clip(path))
+        self._retain_worker(worker)
+        def done(clip):
+            ranges = editor_engine.timeline_ranges(self.editor_clips)
+            insert_at = len(self.editor_clips)
+            for index, (start, end) in enumerate(ranges):
+                if global_time < end: insert_at = index + (global_time >= (start + end) / 2); break
+            self.editor_clips.insert(int(insert_at), clip)
+            self.editor_selected_clip = int(insert_at); self.editor_use_timeline.setChecked(True)
+            self.editor_refresh_all(); self.editor_clip_selected(self.editor_selected_clip); self.schedule_autosave()
+        worker.done.connect(done); worker.error.connect(self.worker_error); worker.start()
 
     def _timeline_item_selected(self, kind, item_id, legacy_index):
         item = next((item for item in self.editor_document.timeline.items if item.id == item_id), None)
@@ -2324,7 +2399,14 @@ class MainWindow(QMainWindow):
                 self.editor_selected_layer = index; self.live_overlay.selected_type = "editor_layer"; self.live_overlay.selected_index = index; self.live_overlay.update()
         elif kind == "subtitle":
             self.live_overlay.selected_type = "sub"; self.live_overlay.update()
-        self.context_inspector.load_properties(kind, item.metadata)
+        properties = item.metadata
+        if kind == "subtitle" and item.group_id in self.editor_document.subtitle_groups:
+            properties = self.editor_document.subtitle_groups[item.group_id].style.to_dict()
+            properties["stroke_color"] = properties.get("outline_color")
+            properties["stroke_width"] = properties.get("outline_width")
+            properties["x"] = properties.get("x_percent")
+            properties["y"] = properties.get("y_percent")
+        self.context_inspector.load_properties(kind, properties)
 
     def editor_clip_selected(self, index, seek=True):
         if not (0 <= index < len(self.editor_clips)):
@@ -2463,6 +2545,8 @@ class MainWindow(QMainWindow):
         self.schedule_autosave()
 
     def editor_clip_reordered(self, source_index, target_index):
+        if 0 <= source_index < len(self.editor_clips) and self.editor_clips[source_index].get("locked", False):
+            self.status("Clip is locked."); return
         new_index = editor_engine.reorder_clip(
             self.editor_clips,
             source_index,
@@ -2476,6 +2560,8 @@ class MainWindow(QMainWindow):
         index = self.editor_selected_clip
         if not (0 <= index < len(self.editor_clips)):
             return
+        if self.editor_clips[index].get("locked", False):
+            self.status("Clip is locked."); return
         target = max(
             0,
             min(len(self.editor_clips) - 1, index + int(delta)),
@@ -2491,6 +2577,8 @@ class MainWindow(QMainWindow):
                 self, "Split", "Chọn clip cần cắt."
             )
             return
+        if self.editor_clips[index].get("locked", False):
+            self.status("Clip is locked."); return
         source_second = self.player.position() / 1000.0
         clip = self.editor_clips[index]
         if (
@@ -2519,6 +2607,8 @@ class MainWindow(QMainWindow):
         index = self.editor_selected_clip
         if not (0 <= index < len(self.editor_clips)):
             return
+        if self.editor_clips[index].get("locked", False):
+            self.status("Clip is locked."); return
         self.editor_clips.pop(index)
         self.editor_selected_clip = min(
             index,
@@ -4639,8 +4729,9 @@ class MainWindow(QMainWindow):
         ratios = {"16:9": 16/9, "9:16": 9/16, "1:1": 1.0, "4:3": 4/3, "3:4": 3/4, "21:9": 21/9, "2:1": 2.0, "5:4": 5/4, "4:5": 4/5}
         self.editor_document.aspect_ratio = str(text)
         self.preview_service.state.aspect_ratio = str(text)
-        aspect = self._source_aspect_cache.get(self.current_video(), 9/16) if text == "Original" else ratios.get(text, 9/16)
-        self.live_overlay.set_output_aspect(aspect)
+        aspect = self._source_aspect_cache.get(self.current_video(), self._last_valid_source_aspect) if text == "Original" else ratios.get(text, 16/9)
+        canvas_w, canvas_h = self.project_canvas_dimensions()
+        self.live_overlay.set_output_canvas(canvas_w, canvas_h)
         self.schedule_autosave()
 
     def _preview_playback_state_changed(self, state):
@@ -5246,28 +5337,53 @@ class MainWindow(QMainWindow):
     # LIVE EDITOR OVERLAY
     # ==================================================================
     def current_output_aspect(self):
-        target = ffm.parse_resolution(self.resolution.currentText())
-        if target:
-            return target[0] / max(1, target[1])
+        ratio_name = self.editor_document.aspect_ratio
+        ratios = {"16:9": 16/9, "9:16": 9/16, "1:1": 1.0, "4:3": 4/3, "3:4": 3/4, "21:9": 21/9, "2:1": 2.0, "5:4": 5/4, "4:5": 4/5}
+        if ratio_name != "Original":
+            return ratios.get(ratio_name, self._last_valid_source_aspect)
         source = self.current_video() or self.project.video_path
         if source:
             key = str(source)
             if key in self._source_aspect_cache:
                 return self._source_aspect_cache[key]
-            try:
-                info = ffm.probe(source)
-                aspect = info["width"] / max(1, info["height"])
-                self._source_aspect_cache[key] = aspect
-                return aspect
-            except Exception:
-                pass
-        return 9 / 16
+            self._request_source_aspect(key)
+        return self._last_valid_source_aspect
+
+    def _request_source_aspect(self, source):
+        if not source or source in self._aspect_probe_inflight or not Path(source).exists(): return
+        self._aspect_probe_inflight.add(source)
+        worker = Worker(lambda progress, log: ffm.probe(source))
+        self._retain_worker(worker)
+        def done(info):
+            self._aspect_probe_inflight.discard(source)
+            width = max(1, int(info.get("width", 0) or 0)); height = max(1, int(info.get("height", 0) or 0))
+            if width > 1 and height > 1:
+                self._source_geometry_cache[source] = (width, height)
+                self._source_aspect_cache[source] = width / height
+                self._last_valid_source_aspect = width / height
+                if self.editor_document.aspect_ratio == "Original":
+                    self.live_overlay.set_output_canvas(width, height)
+                    self.live_overlay.update()
+        worker.done.connect(done)
+        worker.error.connect(lambda _tb: self._aspect_probe_inflight.discard(source))
+        worker.start()
+
+    def project_canvas_dimensions(self):
+        ratio = self.editor_document.aspect_ratio
+        source = self.current_video() or self.project.video_path
+        if ratio == "Original" and source in self._source_geometry_cache:
+            return self._source_geometry_cache[source]
+        aspect = self.current_output_aspect()
+        if aspect >= 1.0:
+            return 1920, max(1, round(1920 / aspect))
+        return max(1, round(1920 * aspect)), 1920
 
     def update_live_overlay_state(self, *args):
         if not hasattr(self, "live_overlay"):
             return
         try:
-            self.live_overlay.set_output_aspect(self.current_output_aspect())
+            canvas_w, canvas_h = self.project_canvas_dimensions()
+            self.live_overlay.set_output_canvas(canvas_w, canvas_h)
 
             if self.preview_is_processed:
                 self.live_overlay.set_blur_state(False, self.blur_style.currentText(), self.blur_opacity.value(), [])
@@ -5395,6 +5511,10 @@ class MainWindow(QMainWindow):
         self.schedule_processed_preview()
 
     def on_live_overlay_selection_changed(self, kind, index):
+        if not kind:
+            self.editor_document.selection.clear()
+            self.editor_timeline.set_selected_item("")
+            return
         if kind == "blur" and index >= 0:
             self.editor_document.selection.select("blur", f"blur:{index}")
             self.editor_timeline.set_selected_item(f"blur:{index}")
@@ -6339,6 +6459,19 @@ class MainWindow(QMainWindow):
     def update_subtitle_preview_style(self, *args):
         if not hasattr(self, "live_overlay"):
             return
+        group = self.editor_document.subtitle_groups.get(self._current_subtitle_group_id())
+        if group is not None:
+            style = self.current_subtitle_style()
+            group.style = SubtitleGroupStyle(
+                font_name=style.font_name, font_size=style.font_size,
+                bold=style.bold, italic=style.italic, color=style.primary_color,
+                outline_color=style.outline_color, outline_width=style.outline,
+                shadow=style.shadow, x_percent=style.x_percent,
+                y_percent=style.y_percent, background_box=style.background_box,
+                background_color=style.background_color,
+                background_opacity=style.background_opacity,
+                animation=style.animation,
+            )
         self.update_live_overlay_state()
         self.schedule_autosave()
         self.schedule_processed_preview()
@@ -6418,7 +6551,7 @@ class MainWindow(QMainWindow):
         self.project.subtitle_path = str(out)
         self.sub_path.setText(str(out))
         self.sub_enabled.setChecked(True)
-        self.load_subtitle_file(str(out))
+        self.load_subtitle_file(str(out), source_type="generated_voice")
         self.autosave_project()
 
         self.update_live_overlay_state()
@@ -6442,11 +6575,25 @@ class MainWindow(QMainWindow):
             self.load_subtitle_file(path)
             self.schedule_autosave()
 
-    def load_subtitle_file(self, path):
+    def load_subtitle_file(self, path, source_type="srt"):
         p = Path(path)
         if not p.exists():
             return
         self.subtitle_group_id = hashlib.sha1(str(p.resolve()).encode("utf-8", errors="ignore")).hexdigest()[:14]
+        style = self.current_subtitle_style()
+        self.editor_document.ensure_subtitle_group(
+            self.subtitle_group_id, source_type, str(p.resolve()),
+            SubtitleGroupStyle(
+                font_name=style.font_name, font_size=style.font_size,
+                bold=style.bold, italic=style.italic, color=style.primary_color,
+                outline_color=style.outline_color, outline_width=style.outline,
+                shadow=style.shadow, x_percent=style.x_percent,
+                y_percent=style.y_percent, background_box=style.background_box,
+                background_color=style.background_color,
+                background_opacity=style.background_opacity,
+                animation=style.animation,
+            ),
+        )
         if p.suffix.lower() == ".srt":
             text = p.read_text(encoding="utf-8-sig", errors="replace")
             self.sub_editor.blockSignals(True)
@@ -6464,6 +6611,9 @@ class MainWindow(QMainWindow):
         self.editor_refresh_all()
 
     def _current_subtitle_group_id(self):
+        selection = self.editor_document.selection.current
+        if selection is not None and selection.kind == "subtitle" and selection.group_id:
+            return selection.group_id
         return getattr(self, "subtitle_group_id", "") or "subtitle-group"
 
     def preview_cues_from_editor(self):
@@ -6771,10 +6921,12 @@ class MainWindow(QMainWindow):
             ),
             "project_aspect_ratio": self.editor_document.aspect_ratio,
             "subtitle_group_id": self._current_subtitle_group_id(),
+            "subtitle_groups": self.editor_document.subtitle_groups_to_dict(),
             "workspace_splitter_sizes": (
                 self.video_editor_tab.sizes()
                 if hasattr(self, "video_editor_tab") else {}
             ),
+            "editor_tracks": [track.to_dict() for track in self.editor_document.timeline.tracks],
             "editor_visible": bool(
                 hasattr(self, "editor_panel")
                 and self.editor_panel.isVisible()
@@ -6948,6 +7100,9 @@ class MainWindow(QMainWindow):
             )
         ratio = str(data.get("project_aspect_ratio", "Original"))
         self.subtitle_group_id = str(data.get("subtitle_group_id", "") or "")
+        self.editor_document.restore_subtitle_groups(data.get("subtitle_groups", {}))
+        if isinstance(data.get("editor_tracks"), list):
+            self.editor_document.timeline.restore_tracks(data["editor_tracks"])
         if hasattr(self, "preview_ratio_combo"):
             self.preview_ratio_combo.setCurrentText(ratio)
         if hasattr(self, "video_editor_tab") and isinstance(data.get("workspace_splitter_sizes"), dict):

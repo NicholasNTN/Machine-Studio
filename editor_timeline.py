@@ -14,6 +14,8 @@ class BasicTimelineWidget(QWidget):
     playheadChanged = Signal(float)
     itemSelected = Signal(str, str, int)
     trackStateChanged = Signal(str, str, bool)
+    mediaDropped = Signal(str, float, str)
+    HEADER_WIDTH = 132.0
 
     TRACKS = (
         ("text", "Text"),
@@ -38,6 +40,7 @@ class BasicTimelineWidget(QWidget):
         self.temp_start = None
         self.temp_end = None
         self.setMinimumHeight(246)
+        self.setAcceptDrops(True)
         self.setMouseTracking(True)
 
     def set_clips(self, clips):
@@ -96,7 +99,7 @@ class BasicTimelineWidget(QWidget):
         height = 34.0
         for clip in self.clips:
             dur = editor_engine.clip_duration(clip)
-            raw_x = 44.0 + cursor * self.zoom
+            raw_x = self.HEADER_WIDTH + cursor * self.zoom
             raw_w = max(2.0, dur * self.zoom)
             # 1px visual separation without changing the timeline scale.
             rects.append(
@@ -113,7 +116,7 @@ class BasicTimelineWidget(QWidget):
                 continue
             lane = "effect" if kind in ("effect", "blur") else "text" if kind in ("image", "logo") else kind
             start = float(getattr(item, "start", 0.0)); end = float(getattr(item, "end", start))
-            rect = QRectF(45.0 + start * self.zoom, self._track_top(lane) + 4.0, max(5.0, (end - start) * self.zoom), 31.0)
+            rect = QRectF(self.HEADER_WIDTH + 1.0 + start * self.zoom, self._track_top(lane) + 4.0, max(5.0, (end - start) * self.zoom), 31.0)
             rects.append((item, rect, lane))
         return rects
 
@@ -121,7 +124,7 @@ class BasicTimelineWidget(QWidget):
         total = max(editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
         return max(
             0.0,
-            min(total, (float(x) - 44.0) / max(0.1, self.zoom)),
+            min(total, (float(x) - self.HEADER_WIDTH) / max(0.1, self.zoom)),
         )
 
     def _handle_rect(self, rect, left=True):
@@ -144,12 +147,12 @@ class BasicTimelineWidget(QWidget):
             top = 34 + index * 40
             p.fillRect(QRectF(0, top, self.width(), 39), QColor(15, 26, 42) if index % 2 == 0 else QColor(18, 31, 50))
             p.setPen(QColor(108, 132, 164)); p.drawLine(0, top + 39, self.width(), top + 39)
-            p.setPen(QColor(210, 222, 238)); p.drawText(QRectF(5, top, 39, 39), Qt.AlignCenter, label[:4])
+            p.setPen(QColor(210, 222, 238)); p.drawText(QRectF(8, top, 72, 39), Qt.AlignVCenter | Qt.AlignLeft, label)
             track = next((track for track in self.tracks if getattr(getattr(track, "kind", ""), "value", "") == key), None)
-            states = ("L" if track and track.locked else "·", "V" if not track or track.visible else "×", "M" if track and track.muted else "S")
+            states = ("🔒" if track and track.locked else "🔓", "👁" if not track or track.visible else "○", "🔇" if track and track.muted else "🔊")
             p.setPen(QColor(128, 151, 181))
             for state_index, state in enumerate(states):
-                p.drawText(QRectF(state_index * 14, top + 22, 14, 14), Qt.AlignCenter, state)
+                p.drawText(QRectF(84 + state_index * 15, top, 15, 39), Qt.AlignCenter, state)
 
         # ruler
         p.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 110), 1))
@@ -157,7 +160,7 @@ class BasicTimelineWidget(QWidget):
         major = 5.0 if self.zoom < 18 else 2.0 if self.zoom < 45 else 1.0
         t = 0.0
         while t <= total + major:
-            x = 44.0 + t * self.zoom
+            x = self.HEADER_WIDTH + t * self.zoom
             p.drawLine(int(x), 18, int(x), 28)
             p.drawText(int(x + 2), 15, f"{t:.0f}s")
             t += major
@@ -202,7 +205,7 @@ class BasicTimelineWidget(QWidget):
             p.setPen(Qt.white); p.drawText(rect.adjusted(5, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, label[:36])
 
         # playhead
-        x = 44.0 + self.playhead * self.zoom
+        x = self.HEADER_WIDTH + self.playhead * self.zoom
         p.setPen(QPen(QColor(255, 70, 70), 2))
         p.drawLine(int(x), 20, int(x), self.height() - 6)
         p.setBrush(QColor(255, 70, 70))
@@ -231,13 +234,14 @@ class BasicTimelineWidget(QWidget):
             self.update()
             return
 
-        if pos.x() < 44:
+        if pos.x() < self.HEADER_WIDTH:
             lane_index = int((pos.y() - 34) // 40)
             if 0 <= lane_index < len(self.TRACKS):
                 key = self.TRACKS[lane_index][0]
                 track = next((track for track in self.tracks if getattr(getattr(track, "kind", ""), "value", "") == key), None)
                 if track is not None:
-                    state_index = min(2, max(0, int(pos.x() // 14)))
+                    state_index = min(2, max(0, int((pos.x() - 84) // 15)))
+                    if pos.x() < 84: return
                     field = ("locked", "visible", "muted")[state_index]
                     setattr(track, field, not getattr(track, field))
                     self.trackStateChanged.emit(track.id, field, getattr(track, field))
@@ -292,6 +296,22 @@ class BasicTimelineWidget(QWidget):
         self.playhead = self._time_at_x(pos.x())
         self.playheadChanged.emit(self.playhead)
         self.update()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()): event.acceptProposedAction()
+        else: event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls(): event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        urls = [url for url in event.mimeData().urls() if url.isLocalFile()]
+        if not urls: event.ignore(); return
+        lane_index = int((event.position().y() - 34) // 40)
+        track_kind = self.TRACKS[lane_index][0] if 0 <= lane_index < len(self.TRACKS) else "video"
+        global_time = self._time_at_x(event.position().x())
+        for url in urls: self.mediaDropped.emit(url.toLocalFile(), global_time, track_kind)
+        event.acceptProposedAction()
 
     def mouseMoveEvent(self, event):
         if self.drag_mode == "playhead":
