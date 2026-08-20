@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from core.subtitle_sizing import preview_font_pixels
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import (
@@ -76,6 +77,8 @@ class InteractivePreviewOverlay(QWidget):
         self.start_editor_layer = None
 
         self.output_aspect = 9 / 16
+        self.output_width = 1080
+        self.output_height = 1920
         self.preview_zoom = 1.0
         self.preview_pan_x = 0.0
         self.preview_pan_y = 0.0
@@ -159,6 +162,11 @@ class InteractivePreviewOverlay(QWidget):
         if aspect and aspect > 0:
             self.output_aspect = float(aspect)
             self.update()
+
+    def set_output_canvas(self, width: int, height: int):
+        self.output_width = max(1, int(width))
+        self.output_height = max(1, int(height))
+        self.set_output_aspect(self.output_width / self.output_height)
 
     def set_preview_zoom(self, zoom: float, reset_pan: bool = False):
         self.preview_zoom = max(0.5, min(3.0, float(zoom or 1.0)))
@@ -353,11 +361,7 @@ class InteractivePreviewOverlay(QWidget):
         cy = vr.top() + vr.height() * y_pct / 100
         box_w = vr.width() * max(0.15, min(0.98, width_pct / 100))
 
-        scale = max(0.45, vr.height() / 1920 * 1.6)
-        visual_font = max(
-            int(getattr(st, "min_font_size", 24) * scale),
-            int(font_size * scale),
-        )
+        visual_font = preview_font_pixels(font_size, vr.width(), vr.height(), self.output_width, self.output_height)
 
         # One-line editor box only. Text is auto-fit during paint.
         box_h = max(38, visual_font * 1.75)
@@ -371,8 +375,7 @@ class InteractivePreviewOverlay(QWidget):
     def _fit_subtitle_font_px(self, text: str, rect: QRectF, st) -> int:
         """One fixed subtitle size for the whole project."""
         vr = self.video_rect()
-        scale = max(0.45, vr.height() / 1920 * 1.6)
-        return max(12, int(getattr(st, "font_size", 48) * scale))
+        return preview_font_pixels(getattr(st, "font_size", 48), vr.width(), vr.height(), self.output_width, self.output_height)
 
     def logo_rect(self) -> QRectF:
         vr = self.video_rect()
@@ -1054,6 +1057,7 @@ class InteractivePreviewOverlay(QWidget):
             self.selected_type = ""
             self.selected_index = -1
             self.drag_mode = ""
+            self.selectionChanged.emit("", -1)
             self.update()
         except Exception:
             self.drag_mode = ""

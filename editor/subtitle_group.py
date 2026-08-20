@@ -1,0 +1,43 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+
+
+@dataclass
+class SubtitleGroupStyle:
+    font_name: str = "Arial"
+    font_size: int = 48
+    bold: bool = True
+    italic: bool = False
+    color: str = "#FFFFFF"
+    outline_color: str = "#000000"
+    outline_width: float = 3.0
+    shadow: float = 1.0
+    alignment: str = "center"
+    x_percent: float = 50.0
+    y_percent: float = 86.0
+    background_box: bool = False
+    background_color: str = "#000000"
+    background_opacity: int = 65
+    animation: str = "Không"
+
+    def to_dict(self): return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**{key: value for key, value in dict(data or {}).items() if key in cls.__dataclass_fields__})
+
+
+@dataclass
+class SubtitleGroup:
+    id: str
+    source_type: str
+    source_path: str
+    style: SubtitleGroupStyle = field(default_factory=SubtitleGroupStyle)
+    segment_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self): return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data):
+        values = dict(data or {}); values["style"] = SubtitleGroupStyle.from_dict(values.get("style", {})); return cls(**values)

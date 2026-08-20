@@ -6,6 +6,7 @@ from editor.snap_engine import SnapEngine
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
+from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -30,7 +31,14 @@ class EditorDomainTests(unittest.TestCase):
     def test_subtitle_size_is_identity_for_ass(self):
         self.assertEqual(canonical_font_size(27), 27)
         self.assertEqual(ass_font_size(27), 27)
-        self.assertEqual(preview_font_pixels(27, 960), 14)
+        self.assertEqual(preview_font_pixels(27, 960, 540, 1920, 1080), 14)
+        self.assertEqual(preview_font_pixels(27, 540, 960, 1080, 1920), 14)
+
+    def test_subtitle_group_round_trip(self):
+        group = SubtitleGroup("g1", "srt", "captions.srt", SubtitleGroupStyle(font_size=27), ["g1:0"])
+        restored = SubtitleGroup.from_dict(group.to_dict())
+        self.assertEqual(restored.style.font_size, 27)
+        self.assertEqual(restored.segment_ids, ["g1:0"])
 
 
 if __name__ == "__main__":

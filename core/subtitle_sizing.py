@@ -6,10 +6,13 @@ def canonical_font_size(value: int | float) -> int:
     return max(8, min(240, int(round(float(value or 0)))))
 
 
-def preview_font_pixels(canonical_size: int | float, viewport_height: int | float, reference_height: int | float = 1920) -> int:
-    """Scale only Qt drawing to its viewport; never mutate the stored size."""
+def preview_font_pixels(canonical_size: int | float, viewport_width: int | float, viewport_height: int | float, project_width: int | float, project_height: int | float) -> int:
+    """Scale from project-output coordinates into the fitted Qt viewport."""
     size = canonical_font_size(canonical_size)
-    scale = max(0.01, float(viewport_height) / max(1.0, float(reference_height)))
+    scale = max(0.01, min(
+        float(viewport_width) / max(1.0, float(project_width)),
+        float(viewport_height) / max(1.0, float(project_height)),
+    ))
     return max(1, int(round(size * scale)))
 
 

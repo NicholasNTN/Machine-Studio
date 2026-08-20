@@ -100,6 +100,11 @@ class TimelineState:
         for track in self.tracks:
             track.item_ids[:] = by_track.get(track.id, [])
 
+    def restore_tracks(self, values: list[dict]) -> None:
+        if values:
+            self.tracks[:] = [Track.from_dict(value) for value in values]
+            self.rebuild_items_from_legacy()
+
     def set_playhead(self, seconds: float) -> float:
         self.playhead_seconds = max(0.0, min(float(seconds or 0.0), self.duration))
         return self.playhead_seconds
