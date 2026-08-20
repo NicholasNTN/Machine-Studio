@@ -11,6 +11,7 @@ env/
 # Runtime/cache
 preview_cache/
 cache/
+.cache/
 temp/
 tmp/
 logs/
