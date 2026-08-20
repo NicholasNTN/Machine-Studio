@@ -12,19 +12,32 @@ class BasicTimelineWidget(QWidget):
     clipTrimChanged = Signal(int, float, float)
     clipReordered = Signal(int, int)
     playheadChanged = Signal(float)
+    itemSelected = Signal(str, str, int)
+    trackStateChanged = Signal(str, str, bool)
+
+    TRACKS = (
+        ("text", "Text"),
+        ("subtitle", "Subtitles"),
+        ("effect", "Effects / Blur"),
+        ("video", "Video"),
+        ("audio", "Audio / AI Voice"),
+    )
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.clips: list[dict] = []
+        self.timeline_items = []
+        self.tracks = []
         self.zoom = 24.0
         self.selected_index = -1
+        self.selected_item_id = ""
         self.playhead = 0.0
         self.drag_mode = ""
         self.press_pos = QPointF()
         self.drag_index = -1
         self.temp_start = None
         self.temp_end = None
-        self.setMinimumHeight(118)
+        self.setMinimumHeight(246)
         self.setMouseTracking(True)
 
     def set_clips(self, clips):
@@ -32,6 +45,15 @@ class BasicTimelineWidget(QWidget):
         if self.selected_index >= len(self.clips):
             self.selected_index = len(self.clips) - 1
         self._update_width()
+        self.update()
+
+    def set_timeline_items(self, items):
+        self.timeline_items = list(items or [])
+        self._update_width()
+        self.update()
+
+    def set_tracks(self, tracks):
+        self.tracks = list(tracks or [])
         self.update()
 
     def set_zoom(self, value):
@@ -43,15 +65,26 @@ class BasicTimelineWidget(QWidget):
         self.selected_index = int(index)
         self.update()
 
+    def set_selected_item(self, item_id):
+        self.selected_item_id = str(item_id or "")
+        self.update()
+
     def set_playhead(self, second):
         self.playhead = max(0.0, float(second or 0.0))
         self.update()
 
     def _update_width(self):
-        duration = editor_engine.total_duration(self.clips)
+        duration = max(
+            editor_engine.total_duration(self.clips),
+            max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0),
+        )
         width = max(700, int(70 + duration * self.zoom))
         self.setMinimumWidth(width)
-        self.resize(width, max(118, self.height()))
+        self.resize(width, max(246, self.height()))
+
+    def _track_top(self, kind):
+        index = next((i for i, (key, _) in enumerate(self.TRACKS) if key == kind), 3)
+        return 34.0 + index * 40.0
 
     def _clip_rects(self):
         # Geometry uses the exact same global-time scale as the red playhead.
@@ -59,8 +92,8 @@ class BasicTimelineWidget(QWidget):
         # from clip boundaries after several clips.
         rects = []
         cursor = 0.0
-        top = 35.0
-        height = 58.0
+        top = self._track_top("video") + 3.0
+        height = 34.0
         for clip in self.clips:
             dur = editor_engine.clip_duration(clip)
             raw_x = 44.0 + cursor * self.zoom
@@ -72,8 +105,20 @@ class BasicTimelineWidget(QWidget):
             cursor += dur
         return rects
 
+    def _item_rects(self):
+        rects = []
+        for item in self.timeline_items:
+            kind = getattr(getattr(item, "kind", "effect"), "value", getattr(item, "kind", "effect"))
+            if kind == "video":
+                continue
+            lane = "effect" if kind in ("effect", "blur") else "text" if kind in ("image", "logo") else kind
+            start = float(getattr(item, "start", 0.0)); end = float(getattr(item, "end", start))
+            rect = QRectF(45.0 + start * self.zoom, self._track_top(lane) + 4.0, max(5.0, (end - start) * self.zoom), 31.0)
+            rects.append((item, rect, lane))
+        return rects
+
     def _time_at_x(self, x):
-        total = editor_engine.total_duration(self.clips)
+        total = max(editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
         return max(
             0.0,
             min(total, (float(x) - 44.0) / max(0.1, self.zoom)),
@@ -94,9 +139,21 @@ class BasicTimelineWidget(QWidget):
         fg = palette.windowText().color()
         p.fillRect(self.rect(), bg)
 
+        # Professional fixed-order track lanes and compact headers.
+        for index, (key, label) in enumerate(self.TRACKS):
+            top = 34 + index * 40
+            p.fillRect(QRectF(0, top, self.width(), 39), QColor(15, 26, 42) if index % 2 == 0 else QColor(18, 31, 50))
+            p.setPen(QColor(108, 132, 164)); p.drawLine(0, top + 39, self.width(), top + 39)
+            p.setPen(QColor(210, 222, 238)); p.drawText(QRectF(5, top, 39, 39), Qt.AlignCenter, label[:4])
+            track = next((track for track in self.tracks if getattr(getattr(track, "kind", ""), "value", "") == key), None)
+            states = ("L" if track and track.locked else "·", "V" if not track or track.visible else "×", "M" if track and track.muted else "S")
+            p.setPen(QColor(128, 151, 181))
+            for state_index, state in enumerate(states):
+                p.drawText(QRectF(state_index * 14, top + 22, 14, 14), Qt.AlignCenter, state)
+
         # ruler
         p.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 110), 1))
-        total = editor_engine.total_duration(self.clips)
+        total = max(editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
         major = 5.0 if self.zoom < 18 else 2.0 if self.zoom < 45 else 1.0
         t = 0.0
         while t <= total + major:
@@ -137,6 +194,13 @@ class BasicTimelineWidget(QWidget):
             p.fillRect(self._handle_rect(rect, True), QColor(255, 211, 70))
             p.fillRect(self._handle_rect(rect, False), QColor(255, 211, 70))
 
+        colors = {"text": QColor(124, 87, 214), "subtitle": QColor(24, 168, 178), "effect": QColor(194, 104, 43), "audio": QColor(39, 143, 95)}
+        for item, rect, lane in self._item_rects():
+            selected = str(getattr(item, "id", "")) == self.selected_item_id
+            p.setPen(QPen(QColor(107, 181, 255) if selected else QColor(214, 225, 239), 3 if selected else 1)); p.setBrush(colors.get(lane, QColor(86, 105, 132))); p.drawRoundedRect(rect, 4, 4)
+            label = str(getattr(item, "metadata", {}).get("text") or getattr(item, "metadata", {}).get("name") or getattr(getattr(item, "kind", "item"), "value", "item"))
+            p.setPen(Qt.white); p.drawText(rect.adjusted(5, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, label[:36])
+
         # playhead
         x = 44.0 + self.playhead * self.zoom
         p.setPen(QPen(QColor(255, 70, 70), 2))
@@ -167,10 +231,37 @@ class BasicTimelineWidget(QWidget):
             self.update()
             return
 
+        if pos.x() < 44:
+            lane_index = int((pos.y() - 34) // 40)
+            if 0 <= lane_index < len(self.TRACKS):
+                key = self.TRACKS[lane_index][0]
+                track = next((track for track in self.tracks if getattr(getattr(track, "kind", ""), "value", "") == key), None)
+                if track is not None:
+                    state_index = min(2, max(0, int(pos.x() // 14)))
+                    field = ("locked", "visible", "muted")[state_index]
+                    setattr(track, field, not getattr(track, field))
+                    self.trackStateChanged.emit(track.id, field, getattr(track, field))
+                    self.update()
+            return
+
+        for item, rect, _lane in reversed(self._item_rects()):
+            if rect.contains(pos):
+                kind = getattr(getattr(item, "kind", "effect"), "value", str(getattr(item, "kind", "effect")))
+                metadata = getattr(item, "metadata", {})
+                legacy_index = -1
+                if metadata in [getattr(candidate, "metadata", None) for candidate in self.timeline_items]:
+                    try: legacy_index = self.timeline_items.index(item)
+                    except ValueError: pass
+                self.itemSelected.emit(kind, str(getattr(item, "id", "")), legacy_index)
+                self.selected_item_id = str(getattr(item, "id", ""))
+                self.update(); return
+
         rects = self._clip_rects()
         for i, rect in enumerate(rects):
             if self._handle_rect(rect, True).contains(pos):
                 self.selected_index = i
+                if self.clips[i].get("locked", False):
+                    self.clipSelected.emit(i); self.update(); return
                 self.drag_index = i
                 self.drag_mode = "trim_left"
                 self.temp_start = float(self.clips[i].get("source_start", 0.0))
@@ -180,6 +271,8 @@ class BasicTimelineWidget(QWidget):
                 return
             if self._handle_rect(rect, False).contains(pos):
                 self.selected_index = i
+                if self.clips[i].get("locked", False):
+                    self.clipSelected.emit(i); self.update(); return
                 self.drag_index = i
                 self.drag_mode = "trim_right"
                 self.temp_start = float(self.clips[i].get("source_start", 0.0))
@@ -190,7 +283,7 @@ class BasicTimelineWidget(QWidget):
             if rect.contains(pos):
                 self.selected_index = i
                 self.drag_index = i
-                self.drag_mode = "move_clip"
+                self.drag_mode = "" if self.clips[i].get("locked", False) else "move_clip"
                 self.setCursor(Qt.ClosedHandCursor)
                 self.clipSelected.emit(i)
                 self.update()

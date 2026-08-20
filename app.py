@@ -20,7 +20,7 @@ from PySide6.QtGui import (
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QPushButton, QLineEdit, QFileDialog, QMessageBox, QTabWidget,
+    QLabel, QPushButton, QLineEdit, QFileDialog, QMessageBox, QTabWidget, QStackedWidget,
     QGroupBox, QListWidget, QListWidgetItem, QComboBox as _QComboBox,
     QDoubleSpinBox as _QDoubleSpinBox, QSpinBox as _QSpinBox,
     QCheckBox, QPlainTextEdit, QProgressBar, QTableWidget,
@@ -41,6 +41,12 @@ from live_overlay import InteractivePreviewOverlay
 from editor_timeline import BasicTimelineWidget
 from editor.document import EditorDocument
 from ui.app_shell import AppShell
+from ui.editor_workspace import EditorWorkspace
+from ui.inspector_panel import InspectorPanel
+from ui.media_panel import MediaPanel
+from ui.tool_panels import ActionListPanel
+from services.preview_service import PreviewService
+from editor.timeline_item import TimelineItem, TimelineItemKind
 
 
 APP_NAME = "Machine Studio"
@@ -97,7 +103,7 @@ WHEEL_INPUT_LOCKED = True
 
 def fmt_time(seconds: float) -> str:
     seconds = max(0, int(seconds or 0))
-    return f"{seconds // 60:02d}:{seconds % 60:02d}"
+    return f"{seconds // 3600:02d}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
 
 
 class _WheelSafeMixin:
@@ -541,6 +547,7 @@ class MainWindow(QMainWindow):
         self.stop_requested = False
         self.process_holder = {"process": None}
         self.editor_document = EditorDocument(self)
+        self.preview_service = PreviewService()
 
         self.narration_path = ""
         self.accompaniment_path = ""
@@ -557,8 +564,10 @@ class MainWindow(QMainWindow):
         self.preview_zoom_percent = 100
 
         # v1.0.12 Basic Video Editor state.
-        self.editor_clips: list[dict] = []
-        self.editor_layers: list[dict] = []
+        # EditorDocument owns these lists.  The legacy names are compatibility
+        # aliases until the remaining v1.0.13 handlers migrate panel by panel.
+        self.editor_clips = self.editor_document.timeline.clips
+        self.editor_layers = self.editor_document.timeline.layers
         self.editor_selected_clip = -1
         self.editor_selected_layer = -1
         self.editor_preview_path = ""
@@ -623,6 +632,7 @@ class MainWindow(QMainWindow):
         self.player.durationChanged.connect(self.on_preview_duration)
         self.player.mediaStatusChanged.connect(self.on_preview_media_status)
         self.player.errorOccurred.connect(self.on_preview_player_error)
+        self.player.playbackStateChanged.connect(self._preview_playback_state_changed)
 
         self.live_audio_sync_timer = QTimer(self)
         self.live_audio_sync_timer.setInterval(350)
@@ -660,6 +670,7 @@ class MainWindow(QMainWindow):
         self._build_ai_tab()
         self._build_download_tab()
         self._build_settings_tab()
+        self._build_professional_editor_workspace()
 
         bottom = QHBoxLayout()
         self.status_label = QLabel("Ready")
@@ -677,13 +688,144 @@ class MainWindow(QMainWindow):
         self.top_bar.set_active("editor")
         self.setCentralWidget(self.app_shell)
 
+    def _build_professional_editor_workspace(self):
+        """Mount legacy working widgets in the new selection-driven NLE shell."""
+        self.media_panel = MediaPanel()
+        self.audio_tool_panel = ActionListPanel(
+            "Audio", ("+ Add Background Music", "+ Add Audio File"),
+            "Imported audio and AI narration appear here.",
+        )
+        self.text_tool_panel = ActionListPanel(
+            "Text", ("+ Add Text", "Get Subtitle From Voice", "Choose SRT"),
+            "Manual text and generated subtitles remain independent.",
+        )
+        self.blur_tool_panel = ActionListPanel(
+            "Blur", ("+ Add Blur Zone",), "No blur zones yet.",
+        )
+        self.logo_tool_panel = ActionListPanel(
+            "Logo", ("+ Add Logo / Image",), "No image overlays yet.",
+        )
+        self.context_inspector = InspectorPanel(self.editor_document.selection)
+        self.context_inspector.propertyChanged.connect(
+            self._apply_inspector_property
+        )
+
+        self.media_panel.addFilesRequested.connect(self.add_files)
+        self.media_panel.importFolderRequested.connect(self._import_media_folder)
+        self.media_panel.mediaAddRequested.connect(
+            lambda path: self.editor_add_paths([path])
+        )
+        self.audio_tool_panel.primaryRequested.connect(self.choose_music_file)
+        self.audio_tool_panel.secondaryRequested.connect(self._choose_audio_file)
+        self.text_tool_panel.primaryRequested.connect(self.editor_add_text_layer)
+        self.text_tool_panel.secondaryRequested.connect(self.get_sub_from_ai)
+        self.text_tool_panel.tertiaryRequested.connect(self.choose_sub)
+        self.blur_tool_panel.primaryRequested.connect(self.add_blur_zone)
+        self.blur_tool_panel.itemSelected.connect(self._select_blur_from_tool)
+        self.logo_tool_panel.primaryRequested.connect(self.editor_add_image_layer)
+        self.logo_tool_panel.itemSelected.connect(self._select_image_from_tool)
+
+        pages = {
+            "media": self.media_panel,
+            "audio": self.audio_tool_panel,
+            "text": self.text_tool_panel,
+            "blur": self.blur_tool_panel,
+            "logo": self.logo_tool_panel,
+        }
+        self.video_editor_tab = EditorWorkspace(
+            pages, self.legacy_preview_panel, self.context_inspector,
+            self.editor_panel,
+        )
+        self.video_editor_tab.splitterSizesChanged.connect(self.schedule_autosave)
+        self.editor_panel.setVisible(True)
+        self.editor_panel.setTitle("Timeline")
+        self.left_panel_btn.hide(); self.right_panel_btn.hide(); self.editor_toggle_btn.hide()
+        self.tabs.insertTab(0, self.video_editor_tab, "Video Editor")
+        self.tabs.setCurrentIndex(0)
+        self._refresh_professional_panels()
+
+    def _import_media_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Import Media Folder")
+        if not folder:
+            return
+        extensions = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
+        paths = [str(path) for path in Path(folder).iterdir() if path.is_file() and path.suffix.lower() in extensions]
+        if paths:
+            self.add_paths(paths)
+
+    def _choose_audio_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Add Audio", "", "Audio (*.wav *.mp3 *.m4a *.aac *.flac *.ogg)"
+        )
+        if path:
+            self.music_file.setText(path)
+            self._refresh_professional_panels()
+            self.schedule_autosave()
+
+    def _refresh_professional_panels(self):
+        if not hasattr(self, "media_panel"):
+            return
+        self.media_panel.set_media(self.queue)
+        audio = []
+        for label, path in (("Background", self.music_file.text().strip()), ("AI narration", self.narration_path)):
+            if path: audio.append(f"{label}: {Path(path).name}")
+        self.audio_tool_panel.set_items(audio)
+        self.blur_tool_panel.set_items([f"Blur {i + 1}" for i in range(len(self.blur_zones()))])
+        images = [layer for layer in self.editor_layers if layer.get("type") == "image"]
+        self.logo_tool_panel.set_items([Path(layer.get("path", "Image")).name for layer in images])
+
+    def _select_blur_from_tool(self, index):
+        if index < 0: return
+        self.editor_document.selection.select("blur", f"blur:{index}")
+        self.live_overlay.selected_type = "blur"; self.live_overlay.selected_index = index; self.live_overlay.update()
+        self.context_inspector.load_properties("blur", {"strength": self.blur_opacity.value(), "opacity": self.blur_opacity.value()})
+
+    def _select_image_from_tool(self, image_index):
+        images = [(index, layer) for index, layer in enumerate(self.editor_layers) if layer.get("type") == "image"]
+        if not (0 <= image_index < len(images)): return
+        index, layer = images[image_index]
+        self.editor_selected_layer = index
+        self.editor_document.selection.select("image", str(layer.get("id")))
+        self.live_overlay.selected_type = "editor_layer"; self.live_overlay.selected_index = index; self.live_overlay.update()
+        self.context_inspector.load_properties("image", layer)
+
+    def _apply_inspector_property(self, key, value):
+        selection = self.editor_document.selection.current
+        if selection is None: return
+        if selection.kind == "video":
+            item = next((clip for clip in self.editor_clips if clip.get("id") == selection.object_id), None)
+            if item is not None:
+                item[key] = value
+                if key == "muted": item["muted"] = bool(value)
+        elif selection.kind in ("text", "image", "logo"):
+            layer = next((layer for layer in self.editor_layers if layer.get("id") == selection.object_id), None)
+            if layer is not None:
+                layer[key] = value
+                if key == "text": layer["text"] = str(value)
+            elif selection.object_id == "primary-overlay-text":
+                widget_map = {"text": self.overlay_text, "font_size": self.overlay_size, "x": self.overlay_x, "y": self.overlay_y, "opacity": None}
+                widget = widget_map.get(key)
+                if widget is not None:
+                    widget.setText(str(value)) if isinstance(widget, QLineEdit) else widget.setValue(value)
+            elif selection.object_id == "primary-logo":
+                widget_map = {"x": self.logo_x, "y": self.logo_y, "scale": self.logo_scale, "opacity": self.logo_opacity}
+                if key in widget_map: widget_map[key].setValue(value)
+        elif selection.kind == "subtitle":
+            if key == "font_size": self.sub_size.setValue(int(value))
+            elif key == "font_name": self.sub_font.setCurrentFont(QFont(str(value)))
+            elif key == "text": return
+        elif selection.kind == "blur":
+            if key in ("strength", "opacity"): self.blur_opacity.setValue(int(value))
+        self.editor_document.synchronize_legacy_items()
+        self.update_live_overlay_state(); self.schedule_autosave()
+
     def _open_top_section(self, section):
         index_by_section = {
             "editor": 0,
-            "voiceover": 0,
-            "ai": 1,
-            "download": 2,
-            "settings": 3,
+            "voiceover": 1,
+            "ai": 2,
+            "download": 3,
+            "settings": 4,
         }
         if section == "menu":
             self.status("Machine Studio v1.1.0 PRO FOUNDATION")
@@ -696,7 +838,7 @@ class MainWindow(QMainWindow):
                 self.status("Voiceover tools are available in the Video Editor audio panel.")
 
     def _top_export(self):
-        self.tabs.setCurrentIndex(0)
+        self.tabs.setCurrentIndex(1)
         self.top_bar.set_active("editor")
         self.export_batch()
 
@@ -1042,6 +1184,7 @@ class MainWindow(QMainWindow):
         # CENTER: PREVIEW
         # ==============================================================
         center = QWidget()
+        self.legacy_preview_panel = center
         cl = QVBoxLayout(center)
         cl.setContentsMargins(3, 3, 3, 3)
 
@@ -1062,17 +1205,11 @@ class MainWindow(QMainWindow):
         )
         phead.addWidget(self.left_panel_btn)
         phead.addWidget(QLabel("Preview"))
-        phead.addWidget(QLabel("Tỉ lệ:"))
-        for label, resolution in [
-            ("9:16", "1080x1920 (Full HD)"),
-            ("3:4", "1080x1440 (3:4)"),
-            ("16:9", "1920x1080 (YouTube)"),
-        ]:
-            btn = QPushButton(label)
-            btn.setObjectName("ratio")
-            btn.setMaximumWidth(56)
-            btn.clicked.connect(lambda checked=False, r=resolution: self.resolution.setCurrentText(r))
-            phead.addWidget(btn)
+        phead.addWidget(QLabel("Canvas"))
+        self.preview_ratio_combo = QComboBox()
+        self.preview_ratio_combo.addItems(["Original", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "2:1", "5:4", "4:5"])
+        self.preview_ratio_combo.currentTextChanged.connect(self.set_project_aspect_ratio)
+        phead.addWidget(self.preview_ratio_combo)
 
         phead.addSpacing(10)
         zoom_out = QPushButton("−")
@@ -1096,6 +1233,11 @@ class MainWindow(QMainWindow):
         phead.addWidget(self.preview_zoom_label)
         phead.addWidget(zoom_in)
         phead.addWidget(zoom_fit)
+        self.preview_zoom_combo = QComboBox()
+        self.preview_zoom_combo.addItems(["Fit", "Fill", "50%", "75%", "100%", "125%", "150%", "200%", "300%"])
+        self.preview_zoom_combo.setCurrentText("100%")
+        self.preview_zoom_combo.currentTextChanged.connect(self._preview_zoom_mode_changed)
+        phead.addWidget(self.preview_zoom_combo)
 
         phead.addStretch(1)
         phead.addWidget(self.right_panel_btn)
@@ -1143,9 +1285,15 @@ class MainWindow(QMainWindow):
 
         self.hide_sub_btn = QPushButton("Hide Sub")
         self.hide_sub_btn.clicked.connect(self.toggle_preview_sub)
-        play = QPushButton("▶ Play")
-        play.setObjectName("success")
-        play.clicked.connect(self.toggle_play)
+        self.preview_play_button = QPushButton("▶ Play")
+        self.preview_play_button.setObjectName("success")
+        self.preview_play_button.clicked.connect(self.toggle_play)
+        start_button = QPushButton("|◀")
+        start_button.setToolTip("Go to start")
+        start_button.clicked.connect(lambda: self.editor_seek_global(0.0) if self.editor_timeline_active() else self.player.setPosition(0))
+        end_button = QPushButton("▶|")
+        end_button.setToolTip("Go to end")
+        end_button.clicked.connect(lambda: self.editor_seek_global(self.editor_master_total()) if self.editor_timeline_active() else self.player.setPosition(self.player.duration()))
         self.update_preview_btn = QPushButton("↻ Render cache ngầm")
         self.update_preview_btn.setObjectName("cyan")
         self.update_preview_btn.clicked.connect(self.preview_button_action)
@@ -1154,9 +1302,11 @@ class MainWindow(QMainWindow):
         live_btn.clicked.connect(self.return_to_live_source)
 
         playrow.addStretch(1)
+        playrow.addWidget(start_button)
         playrow.addWidget(self.editor_toggle_btn)
         playrow.addWidget(self.hide_sub_btn)
-        playrow.addWidget(play)
+        playrow.addWidget(self.preview_play_button)
+        playrow.addWidget(end_button)
         playrow.addWidget(self.update_preview_btn)
         playrow.addWidget(live_btn)
         playrow.addStretch(1)
@@ -1819,6 +1969,8 @@ class MainWindow(QMainWindow):
         self.editor_timeline.playheadChanged.connect(
             self.editor_global_playhead_changed
         )
+        self.editor_timeline.itemSelected.connect(self._timeline_item_selected)
+        self.editor_timeline.trackStateChanged.connect(self._timeline_track_state_changed)
 
         zoom_box = QVBoxLayout()
         zoom_box.addWidget(QLabel("Zoom"))
@@ -2115,7 +2267,11 @@ class MainWindow(QMainWindow):
     def editor_refresh_all(self):
         if not hasattr(self, "editor_timeline"):
             return
+        self.editor_document.synchronize_legacy_items()
         self.editor_timeline.set_clips(self.editor_clips)
+        self._synchronize_supplemental_timeline_items()
+        self.editor_timeline.set_timeline_items(self.editor_document.timeline.items)
+        self.editor_timeline.set_tracks(self.editor_document.timeline.tracks)
         self.editor_timeline.set_selected(self.editor_selected_clip)
         self.editor_total_label.setText(
             f"Timeline: {editor_engine.total_duration(self.editor_clips):.2f} s"
@@ -2124,6 +2280,51 @@ class MainWindow(QMainWindow):
         if self.editor_timeline_active():
             self.editor_update_master_timeline_ui()
         self.update_live_overlay_state()
+        self._refresh_professional_panels()
+
+    def _synchronize_supplemental_timeline_items(self):
+        items = []
+        if self.preview_cues:
+            track = self.editor_document.timeline.track_for_kind(TimelineItemKind.SUBTITLE)
+            group = self._current_subtitle_group_id()
+            for index, cue in enumerate(self.preview_cues):
+                start, end, text = cue[:3]
+                items.append(TimelineItem(TimelineItemKind.SUBTITLE, track.id, float(start), float(end), id=f"{group}:{index}", group_id=group, metadata={"text": text, "font_size": self.sub_size.value()}))
+        audio_path = self.narration_path or (self.voice_file.text().strip() if hasattr(self, "voice_file") else "")
+        if audio_path:
+            track = self.editor_document.timeline.track_for_kind(TimelineItemKind.AUDIO)
+            duration = max(self.editor_document.timeline.duration, self.narration_player.duration() / 1000.0)
+            items.append(TimelineItem(TimelineItemKind.AUDIO, track.id, 0.0, duration, id="ai-narration", source_ref=audio_path, metadata={"name": "AI Narration", "volume": self.narration_volume.value()}))
+        effect_track = self.editor_document.timeline.track_for_kind(TimelineItemKind.BLUR)
+        duration = max(0.1, editor_engine.total_duration(self.editor_clips) or self.player.duration() / 1000.0)
+        for index, zone in enumerate(self.blur_zones()):
+            items.append(TimelineItem(TimelineItemKind.BLUR, effect_track.id, float(zone.get("start", 0.0)), float(zone.get("end", duration)), id=f"blur:{index}", metadata=zone))
+        self.editor_document.timeline.set_supplemental_items(items)
+
+    def _timeline_track_state_changed(self, track_id, field, value):
+        track = next((track for track in self.editor_document.timeline.tracks if track.id == track_id), None)
+        if track is None: return
+        for item in self.editor_document.timeline.items:
+            if item.track_id != track_id: continue
+            setattr(item, field, bool(value))
+            if field == "locked": item.metadata["locked"] = bool(value)
+            elif field == "visible": item.metadata["enabled"] = bool(value)
+            elif field == "muted": item.metadata["muted"] = bool(value)
+        self.update_live_overlay_state(); self.schedule_autosave()
+
+    def _timeline_item_selected(self, kind, item_id, legacy_index):
+        item = next((item for item in self.editor_document.timeline.items if item.id == item_id), None)
+        if item is None: return
+        group_id = item.group_id if kind == "subtitle" else ""
+        self.editor_document.selection.select(kind, item_id, group_id)
+        self.editor_timeline.set_selected_item(item_id)
+        if kind in ("text", "image", "logo"):
+            index = next((i for i, layer in enumerate(self.editor_layers) if layer.get("id") == item_id), -1)
+            if index >= 0:
+                self.editor_selected_layer = index; self.live_overlay.selected_type = "editor_layer"; self.live_overlay.selected_index = index; self.live_overlay.update()
+        elif kind == "subtitle":
+            self.live_overlay.selected_type = "sub"; self.live_overlay.update()
+        self.context_inspector.load_properties(kind, item.metadata)
 
     def editor_clip_selected(self, index, seek=True):
         if not (0 <= index < len(self.editor_clips)):
@@ -2134,6 +2335,9 @@ class MainWindow(QMainWindow):
         self.editor_selected_clip = int(index)
         self.editor_timeline.set_selected(index)
         clip = self.editor_clips[index]
+        self.editor_document.selection.select("video", str(clip.get("id", "")))
+        if hasattr(self, "context_inspector"):
+            self.context_inspector.load_properties("video", clip)
 
         self.editor_clip_name.setText(
             f"{index + 1}. {clip.get('name', Path(clip.get('path','')).name)}"
@@ -2396,7 +2600,7 @@ class MainWindow(QMainWindow):
             return False
 
     def editor_master_total(self):
-        return editor_engine.total_duration(self.editor_clips)
+        return self.editor_document.duration
 
     def editor_update_master_timeline_ui(self, global_second=None):
         if not self.editor_timeline_active():
@@ -2665,6 +2869,8 @@ class MainWindow(QMainWindow):
                 if meta == selected_meta:
                     self.editor_layer_list.setCurrentRow(row)
                     break
+        self.editor_document.synchronize_legacy_items()
+        self._refresh_professional_panels()
 
     def toggle_editor_layer_properties(self, checked):
         checked = bool(checked)
@@ -3554,6 +3760,25 @@ class MainWindow(QMainWindow):
             QPushButton#navButton:hover { background:#1c2b40; color:#ffffff; }
             QPushButton#navButton:checked { background:#243a57; color:#ffffff; }
             QPushButton#topExport { background:#2f7df4; padding:10px 22px; }
+            QFrame#leftWorkspace, QFrame#inspectorPanel, QWidget#toolPage {
+                background:#101a29; border:1px solid #26374d; border-radius:9px;
+            }
+            QFrame#toolNav { background:#0b1320; border-right:1px solid #26374d; }
+            QPushButton#toolButton {
+                background:transparent; color:#91a5bf; border-radius:8px;
+                padding:4px; font-size:10px;
+            }
+            QPushButton#toolButton:hover { background:#1b2b41; color:white; }
+            QPushButton#toolButton:checked { background:#245ea7; color:white; }
+            QLabel#panelTitle { font-size:15px; font-weight:750; color:#f5f8fd; padding:4px; }
+            QLabel#inspectorHeading { font-size:14px; font-weight:700; color:#7db7ff; padding:5px 0; }
+            QLabel#emptyIcon { color:#527296; font-size:34px; }
+            QLabel#emptyTitle { color:#dbe8f7; font-size:14px; font-weight:700; }
+            QFrame#mediaDropArea { border:1px dashed #46617f; border-radius:9px; background:#0b1523; }
+            QFrame#mediaCard { border:1px solid #2b3c52; border-radius:8px; background:#142236; }
+            QFrame#mediaCard:hover { border-color:#3f8ce8; background:#182a42; }
+            QLabel#mediaThumb { background:#080e17; border-radius:6px; color:#5d7999; font-size:20px; }
+            QPushButton#cardAdd { background:#2878da; border-radius:14px; padding:0; font-size:18px; }
         """)
 
     # ==================================================================
@@ -4321,6 +4546,7 @@ class MainWindow(QMainWindow):
                 existing.add(p)
         if self.queue and self.queue_list.currentRow() < 0:
             self.queue_list.setCurrentRow(0)
+        self._refresh_professional_panels()
 
     def add_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -4335,6 +4561,7 @@ class MainWindow(QMainWindow):
             if 0 <= row < len(self.queue):
                 self.queue.pop(row)
                 self.queue_list.takeItem(row)
+        self._refresh_professional_panels()
 
     def current_video(self):
         row = self.queue_list.currentRow()
@@ -4386,7 +4613,7 @@ class MainWindow(QMainWindow):
         self.schedule_autosave()
 
     def set_preview_zoom_percent(self, percent):
-        self.preview_zoom_percent = max(50, min(300, int(percent)))
+        self.preview_zoom_percent = self.preview_service.set_zoom(percent)
         if hasattr(self, "preview_zoom_label"):
             self.preview_zoom_label.setText(
                 f"{self.preview_zoom_percent}%"
@@ -4397,6 +4624,28 @@ class MainWindow(QMainWindow):
                 reset_pan=(self.preview_zoom_percent <= 100),
             )
         self.schedule_autosave()
+
+    def _preview_zoom_mode_changed(self, text):
+        if text == "Fit":
+            self.preview_service.state.fit_mode = "Fit"
+            self.reset_preview_zoom()
+        elif text == "Fill":
+            self.preview_service.state.fit_mode = "Fill"
+            self.set_preview_zoom_percent(125)
+        elif text.endswith("%"):
+            self.set_preview_zoom_percent(int(text[:-1]))
+
+    def set_project_aspect_ratio(self, text):
+        ratios = {"16:9": 16/9, "9:16": 9/16, "1:1": 1.0, "4:3": 4/3, "3:4": 3/4, "21:9": 21/9, "2:1": 2.0, "5:4": 5/4, "4:5": 4/5}
+        self.editor_document.aspect_ratio = str(text)
+        self.preview_service.state.aspect_ratio = str(text)
+        aspect = self._source_aspect_cache.get(self.current_video(), 9/16) if text == "Original" else ratios.get(text, 9/16)
+        self.live_overlay.set_output_aspect(aspect)
+        self.schedule_autosave()
+
+    def _preview_playback_state_changed(self, state):
+        if hasattr(self, "preview_play_button"):
+            self.preview_play_button.setText("❚❚ Pause" if state == QMediaPlayer.PlayingState else "▶ Play")
 
     def change_preview_zoom(self, delta):
         self.set_preview_zoom_percent(
@@ -4870,6 +5119,7 @@ class MainWindow(QMainWindow):
                 fn()
             except Exception:
                 self.log_line(f"[BLUR {name} ERROR]\n" + traceback.format_exc())
+        self._refresh_professional_panels()
 
 
     def edit_blur_zone(self):
@@ -5146,17 +5396,30 @@ class MainWindow(QMainWindow):
 
     def on_live_overlay_selection_changed(self, kind, index):
         if kind == "blur" and index >= 0:
+            self.editor_document.selection.select("blur", f"blur:{index}")
+            self.editor_timeline.set_selected_item(f"blur:{index}")
             zones = self.all_live_blur_zones()
             if index < len(zones):
                 row = int(zones[index].get("_list_row", index))
                 self.blur_zone_list.setCurrentRow(row)
             self.blur_params_toggle.setChecked(True)
         elif kind == "sub":
+            self.editor_document.selection.select("subtitle", "subtitle", self._current_subtitle_group_id())
             self.sub_params_toggle.setChecked(True)
         elif kind == "logo":
+            self.editor_document.selection.select("logo", "primary-logo")
+            self.context_inspector.load_properties("logo", {"x": self.logo_x.value(), "y": self.logo_y.value(), "scale": self.logo_scale.value(), "opacity": self.logo_opacity.value()})
             self.logo_params_toggle.setChecked(True)
         elif kind == "text":
+            self.editor_document.selection.select("text", "primary-overlay-text")
+            self.context_inspector.load_properties("text", {"text": self.overlay_text.text(), "font_name": self.overlay_font.currentFont().family(), "font_size": self.overlay_size.value(), "x": self.overlay_x.value(), "y": self.overlay_y.value(), "opacity": 100})
             self.overlay_params_toggle.setChecked(True)
+        elif kind == "editor_layer" and 0 <= index < len(self.editor_layers):
+            layer = self.editor_layers[index]
+            selection_kind = "image" if layer.get("type") == "image" else "text"
+            self.editor_document.selection.select(selection_kind, str(layer.get("id", "")), str(layer.get("group_id", "")))
+            self.editor_timeline.set_selected_item(str(layer.get("id", "")))
+            self.context_inspector.load_properties(selection_kind, layer)
 
     def toggle_blur_params(self, checked):
         self.blur_params_panel.setVisible(checked)
@@ -6183,6 +6446,7 @@ class MainWindow(QMainWindow):
         p = Path(path)
         if not p.exists():
             return
+        self.subtitle_group_id = hashlib.sha1(str(p.resolve()).encode("utf-8", errors="ignore")).hexdigest()[:14]
         if p.suffix.lower() == ".srt":
             text = p.read_text(encoding="utf-8-sig", errors="replace")
             self.sub_editor.blockSignals(True)
@@ -6197,6 +6461,10 @@ class MainWindow(QMainWindow):
             self.sub_editor.blockSignals(False)
             self.preview_cues = []
         self.update_preview_subtitle(self.player.position() / 1000)
+        self.editor_refresh_all()
+
+    def _current_subtitle_group_id(self):
+        return getattr(self, "subtitle_group_id", "") or "subtitle-group"
 
     def preview_cues_from_editor(self):
         if Path(self.sub_path.text().strip()).suffix.lower() == ".srt":
@@ -6501,6 +6769,12 @@ class MainWindow(QMainWindow):
             "preview_zoom_percent": int(
                 getattr(self, "preview_zoom_percent", 100)
             ),
+            "project_aspect_ratio": self.editor_document.aspect_ratio,
+            "subtitle_group_id": self._current_subtitle_group_id(),
+            "workspace_splitter_sizes": (
+                self.video_editor_tab.sizes()
+                if hasattr(self, "video_editor_tab") else {}
+            ),
             "editor_visible": bool(
                 hasattr(self, "editor_panel")
                 and self.editor_panel.isVisible()
@@ -6627,13 +6901,13 @@ class MainWindow(QMainWindow):
 
         # Restore non-destructive Basic Editor state.
         if isinstance(data.get("editor_clips"), list):
-            self.editor_clips = [
+            self.editor_clips[:] = [
                 editor_engine.normalize_clip(c)
                 for c in data["editor_clips"]
                 if isinstance(c, dict)
             ]
         if isinstance(data.get("editor_layers"), list):
-            self.editor_layers = [
+            self.editor_layers[:] = [
                 dict(layer)
                 for layer in data["editor_layers"]
                 if isinstance(layer, dict)
@@ -6672,6 +6946,12 @@ class MainWindow(QMainWindow):
                 self.preview_zoom_percent / 100.0,
                 reset_pan=True,
             )
+        ratio = str(data.get("project_aspect_ratio", "Original"))
+        self.subtitle_group_id = str(data.get("subtitle_group_id", "") or "")
+        if hasattr(self, "preview_ratio_combo"):
+            self.preview_ratio_combo.setCurrentText(ratio)
+        if hasattr(self, "video_editor_tab") and isinstance(data.get("workspace_splitter_sizes"), dict):
+            QTimer.singleShot(0, lambda sizes=data["workspace_splitter_sizes"]: self.video_editor_tab.restore_sizes(sizes))
 
         restore_sizes = data.get("editor_restore_sizes")
         if isinstance(restore_sizes, list) and len(restore_sizes) >= 2:
