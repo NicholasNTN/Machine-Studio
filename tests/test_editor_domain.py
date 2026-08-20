@@ -1,0 +1,37 @@
+import unittest
+
+from core.subtitle_sizing import ass_font_size, canonical_font_size, preview_font_pixels
+from editor.selection_ref import SelectionRef
+from editor.snap_engine import SnapEngine
+from editor.timeline_item import TimelineItem, TimelineItemKind
+from editor.timeline_state import TimelineState
+from editor.track import Track, TrackKind
+
+
+class EditorDomainTests(unittest.TestCase):
+    def test_non_video_content_extends_trimmed_video_duration(self):
+        state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])
+        track = state.track_for_kind(TimelineItemKind.AUDIO)
+        state.items.append(TimelineItem(TimelineItemKind.AUDIO, track.id, 0, 58.0))
+        self.assertEqual(state.duration, 58.0)
+
+    def test_trimmed_video_remains_duration_baseline(self):
+        state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])
+        self.assertAlmostEqual(state.duration, 51.523)
+
+    def test_tracks_serialize(self):
+        track = Track("Audio", TrackKind.AUDIO, locked=True, muted=True, item_ids=["a1"])
+        self.assertEqual(Track.from_dict(track.to_dict()), track)
+
+    def test_snap_and_selection_identity(self):
+        self.assertEqual(SnapEngine(0.1).snap(1.04, [(1.0, "playhead")]).target_kind, "playhead")
+        self.assertEqual(SelectionRef("subtitle", "s1", "group-a").group_id, "group-a")
+
+    def test_subtitle_size_is_identity_for_ass(self):
+        self.assertEqual(canonical_font_size(27), 27)
+        self.assertEqual(ass_font_size(27), 27)
+        self.assertEqual(preview_font_pixels(27, 960), 14)
+
+
+if __name__ == "__main__":
+    unittest.main()

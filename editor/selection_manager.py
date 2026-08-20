@@ -1,15 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from PySide6.QtCore import QObject, Signal
-
-
-@dataclass(frozen=True)
-class SelectionRef:
-    kind: str
-    object_id: str
-    group_id: str = ""
+from .selection_ref import SelectionRef
 
 
 class SelectionManager(QObject):

@@ -7,6 +7,7 @@ import re
 import textwrap
 
 from .models import SubtitleStyle
+from .subtitle_sizing import ass_font_size
 
 
 PRESETS: dict[str, SubtitleStyle] = {
@@ -528,7 +529,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Default,{style.font_name},{style.font_size},{primary},{secondary},{outline},{back},{bold},{italic},0,0,100,100,0,0,{border_style},{style.outline:.2f},{style.shadow:.2f},5,20,20,20,1
+Style: Default,{style.font_name},{ass_font_size(style.font_size)},{primary},{secondary},{outline},{back},{bold},{italic},0,0,100,100,0,0,{border_style},{style.outline:.2f},{style.shadow:.2f},5,20,20,20,1
 Style: Overlay,{overlay_font_name},{overlay_font_size},{_hex_to_ass(overlay_color,100)},{_hex_to_ass(overlay_color,100)},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,7,20,20,20,1
 
 [Events]

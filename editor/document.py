@@ -35,10 +35,19 @@ class EditorDocument(QObject):
         self.playheadChanged.emit(value)
 
     def replace_legacy_state(self, clips: list[dict], layers: list[dict]) -> None:
+        """Copy external state into document-owned lists (migration boundary only)."""
         before = self.duration
-        self.timeline.clips = clips
-        self.timeline.layers = layers
-        self.layers.layers = layers
+        self.timeline.clips[:] = clips
+        self.timeline.layers[:] = layers
+        self.layers.layers = self.timeline.layers
+        self.timeline.rebuild_items_from_legacy()
+        self.changed.emit()
+        if abs(before - self.duration) > 0.0001:
+            self.durationChanged.emit(self.duration)
+
+    def synchronize_legacy_items(self) -> None:
+        before = self.duration
+        self.timeline.rebuild_items_from_legacy()
         self.changed.emit()
         if abs(before - self.duration) > 0.0001:
             self.durationChanged.emit(self.duration)

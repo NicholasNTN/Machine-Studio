@@ -1,7 +1,5 @@
-"""Editor-domain foundations for Machine Studio."""
+"""Editor-domain foundations for Machine Studio.
 
-from .document import EditorDocument
-from .selection_manager import SelectionManager, SelectionRef
-from .timeline_state import TimelineState
-
-__all__ = ["EditorDocument", "SelectionManager", "SelectionRef", "TimelineState"]
+Modules are intentionally not eagerly imported here.  Pure domain modules remain
+testable on machines that do not have the Qt runtime installed.
+"""
