@@ -1,4 +1,7 @@
-# MachineScope Studio v1.0.13 PRO UI + LIVE TIMELINE BETA
+# Machine Studio v1.1.0 PRO FOUNDATION
+
+Phase 1 introduces the modular editor, service, and professional application-shell
+foundations while preserving the v1.0.13 processing pipeline.
 
 MachineScope Studio v1.0.13 — PRO UI + LIVE TIMELINE
 

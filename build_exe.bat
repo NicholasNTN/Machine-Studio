@@ -10,14 +10,14 @@ if not exist ".venv\Scripts\python.exe" (
 
 ".venv\Scripts\python.exe" -m pip install --upgrade pyinstaller
 ".venv\Scripts\pyinstaller.exe" --noconfirm --clean --windowed ^
-  --name "MachineScopeStudio" ^
+  --name "MachineStudio" ^
   --collect-all PySide6 ^
   --collect-all google.genai ^
   --collect-all edge_tts ^
   app.py
 
 echo.
-echo Build xong. EXE nam trong dist\MachineScopeStudio\
-echo Copy tools\ffmpeg.exe va tools\ffprobe.exe vao dist\MachineScopeStudio\tools\ neu can.
+echo Build xong. EXE nam trong dist\MachineStudio\
+echo Copy tools\ffmpeg.exe va tools\ffprobe.exe vao dist\MachineStudio\tools\ neu can.
 echo Demucs la optional; nen test bang run.bat truoc khi build.
 pause

@@ -39,10 +39,12 @@ from core import subtitle_detector
 from core.system_info import get_system_summary
 from live_overlay import InteractivePreviewOverlay
 from editor_timeline import BasicTimelineWidget
+from editor.document import EditorDocument
+from ui.app_shell import AppShell
 
 
-APP_NAME = "MachineScope Studio"
-VERSION = "1.0.13 PRO UI + LIVE TIMELINE BETA"
+APP_NAME = "Machine Studio"
+VERSION = "v1.1.0 PRO FOUNDATION"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -538,6 +540,7 @@ class MainWindow(QMainWindow):
         self._source_aspect_cache = {}
         self.stop_requested = False
         self.process_holder = {"process": None}
+        self.editor_document = EditorDocument(self)
 
         self.narration_path = ""
         self.accompaniment_path = ""
@@ -563,6 +566,9 @@ class MainWindow(QMainWindow):
         self.editor_loading_clip = False
         self.editor_sync_guard = False
         self.editor_last_splitter_sizes = [760, 300]
+        self.editor_document.replace_legacy_state(
+            self.editor_clips, self.editor_layers
+        )
 
         # v0.7.2 background-preview state
         self.preview_dirty = False
@@ -632,10 +638,9 @@ class MainWindow(QMainWindow):
     # BUILD UI
     # ==================================================================
     def _build(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        main = QVBoxLayout(central)
-        main.setContentsMargins(6, 6, 6, 6)
+        content = QWidget()
+        main = QVBoxLayout(content)
+        main.setContentsMargins(0, 0, 0, 0)
 
         self.tabs = QTabWidget()
         main.addWidget(self.tabs, 1)
@@ -649,6 +654,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.ai_tab, "🧠 AI Studio")
         self.tabs.addTab(self.download_tab, "⬇ Downloader")
         self.tabs.addTab(self.settings_tab, "⚙ Settings")
+        self.tabs.tabBar().hide()
 
         self._build_export_tab()
         self._build_ai_tab()
@@ -663,6 +669,36 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.status_label)
         bottom.addWidget(self.progress, 1)
         main.addLayout(bottom)
+
+        self.app_shell = AppShell(content)
+        self.top_bar = self.app_shell.top_bar
+        self.top_bar.sectionRequested.connect(self._open_top_section)
+        self.top_bar.exportRequested.connect(self._top_export)
+        self.top_bar.set_active("editor")
+        self.setCentralWidget(self.app_shell)
+
+    def _open_top_section(self, section):
+        index_by_section = {
+            "editor": 0,
+            "voiceover": 0,
+            "ai": 1,
+            "download": 2,
+            "settings": 3,
+        }
+        if section == "menu":
+            self.status("Machine Studio v1.1.0 PRO FOUNDATION")
+            return
+        index = index_by_section.get(section)
+        if index is not None:
+            self.tabs.setCurrentIndex(index)
+            self.top_bar.set_active(section)
+            if section == "voiceover":
+                self.status("Voiceover tools are available in the Video Editor audio panel.")
+
+    def _top_export(self):
+        self.tabs.setCurrentIndex(0)
+        self.top_bar.set_active("editor")
+        self.export_batch()
 
     # ------------------------------------------------------------------
     # VIDEO EXPORTER
@@ -751,6 +787,7 @@ class MainWindow(QMainWindow):
         # ==============================================================
         left_scroll = QScrollArea()
         self.export_left_panel = left_scroll
+        left_scroll.setMinimumWidth(260)
         left_scroll.setWidgetResizable(True)
         left = QWidget()
         left_scroll.setWidget(left)
@@ -1167,6 +1204,7 @@ class MainWindow(QMainWindow):
         # ==============================================================
         right_scroll = QScrollArea()
         self.export_right_panel = right_scroll
+        right_scroll.setMinimumWidth(280)
         right_scroll.setWidgetResizable(True)
         right = QWidget()
         right_scroll.setWidget(right)
@@ -3505,6 +3543,17 @@ class MainWindow(QMainWindow):
             QLabel#readyText { color:#24e383; font-weight:700; }
             QLabel#warnText { color:#ffd000; font-weight:700; }
             QLabel#dialogTitle { font-size:18px;font-weight:700;color:#20b9ff;padding:8px; }
+            QFrame#topBar {
+                background:#111c2c; border:1px solid #2a3b52; border-radius:10px;
+            }
+            QLabel#brandLabel { color:#f4f8ff; font-size:14px; font-weight:800; padding:0 10px; }
+            QLabel#projectStatus { color:#8ea3bd; padding:0 10px; }
+            QPushButton#navButton {
+                background:transparent; color:#9fb0c6; border-radius:7px; padding:9px 12px;
+            }
+            QPushButton#navButton:hover { background:#1c2b40; color:#ffffff; }
+            QPushButton#navButton:checked { background:#243a57; color:#ffffff; }
+            QPushButton#topExport { background:#2f7df4; padding:10px 22px; }
         """)
 
     # ==================================================================
@@ -3779,6 +3828,8 @@ class MainWindow(QMainWindow):
         if self._restoring_state:
             return
         if self.project.video_path:
+            if hasattr(self, "top_bar"):
+                self.top_bar.set_project_status("Saving…")
             self.autosave_timer.start()
 
     def capture_project_state(self):
@@ -3800,8 +3851,12 @@ class MainWindow(QMainWindow):
             self.settings.data["last_project"] = str(path)
             self.settings.save()
             self.autosave_label.setText(f"● Auto-save: {path.name}")
+            if hasattr(self, "top_bar"):
+                self.top_bar.set_project_status(f"Autosaved  •  {path.name}")
         except Exception as e:
             self.status(f"Auto-save lỗi: {e}")
+            if hasattr(self, "top_bar"):
+                self.top_bar.set_project_status("Autosave error")
 
     def save_ai_project(self):
         if not self.project.video_path:
@@ -3810,7 +3865,7 @@ class MainWindow(QMainWindow):
         self.capture_project_state()
         default = str(self.project_autosave_path() or (ROOT / "project.json"))
         path, _ = QFileDialog.getSaveFileName(
-            self, "Lưu Project", default, "MachineScope Project (*.json)"
+            self, "Lưu Project", default, "Machine Studio Project (*.json)"
         )
         if not path:
             return
@@ -3823,7 +3878,7 @@ class MainWindow(QMainWindow):
 
     def open_ai_project(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Mở Project", "", "MachineScope Project (*.json)"
+            self, "Mở Project", "", "Machine Studio Project (*.json)"
         )
         if path:
             self.load_project_file(path, show_message=True)
@@ -6583,6 +6638,9 @@ class MainWindow(QMainWindow):
                 for layer in data["editor_layers"]
                 if isinstance(layer, dict)
             ]
+        self.editor_document.replace_legacy_state(
+            self.editor_clips, self.editor_layers
+        )
         if hasattr(self, "editor_use_timeline"):
             self.editor_use_timeline.setChecked(
                 bool(data.get("editor_use_timeline", False))
@@ -6823,7 +6881,7 @@ class MainWindow(QMainWindow):
                 and self.editor_use_timeline.isChecked()
                 and self.editor_clips
             ):
-                target = next_target("MachineScope_Timeline.mp4")
+                target = next_target("MachineStudio_Timeline.mp4")
                 temp_target = target.with_name(
                     target.stem + ".__rendering__.mp4"
                 )
@@ -7321,10 +7379,10 @@ class MainWindow(QMainWindow):
         self.dl_detected.setText(f"✓ {platform}: {cleaned}")
         self.dl_log.clear()
         self.dl_log.appendPlainText(
-            f"[MachineScope] yt-dlp: {downloader.yt_dlp_version()}"
+            f"[Machine Studio] yt-dlp: {downloader.yt_dlp_version()}"
         )
-        self.dl_log.appendPlainText(f"[MachineScope] Platform: {platform}")
-        self.dl_log.appendPlainText(f"[MachineScope] URL: {cleaned}")
+        self.dl_log.appendPlainText(f"[Machine Studio] Platform: {platform}")
+        self.dl_log.appendPlainText(f"[Machine Studio] URL: {cleaned}")
 
         def job(progress, log):
             return downloader.download_video(

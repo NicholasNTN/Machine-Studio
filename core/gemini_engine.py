@@ -144,7 +144,7 @@ def fast_analyze_and_script(
 
     c = _client(api_key)
 
-    prompt = f"""You are the single-pass video analyst and script writer for MachineScope Studio.
+    prompt = f"""You are the single-pass video analyst and script writer for Machine Studio.
 
 TARGET MARKET: {market}
 STYLE: {style}

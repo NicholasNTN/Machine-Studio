@@ -189,7 +189,7 @@ def _call_chat(
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "User-Agent": "MachineScope-Studio/1.0.7",
+                "User-Agent": "Machine-Studio/1.1.0",
                 "X-Client-Request-Id": client_request_id,
             },
         )
@@ -412,7 +412,7 @@ def fast_analyze_and_script(
     if not scenes:
         raise AIProviderError("Không có frame để AI phân tích.")
 
-    prompt = f"""You are the single-pass video analyst and script writer for MachineScope Studio.
+    prompt = f"""You are the single-pass video analyst and script writer for Machine Studio.
 
 TARGET MARKET: {market}
 STYLE: {style}

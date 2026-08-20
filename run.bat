@@ -13,7 +13,7 @@ echo ===== START %date% %time% =====>> "logs\console.log"
 set RC=%ERRORLEVEL%
 if not "%RC%"=="0" (
   echo.
-  echo [ERROR] MachineScope Studio vua thoat bat thuong. Exit code: %RC%
+  echo [ERROR] Machine Studio vua thoat bat thuong. Exit code: %RC%
   echo Xem logs\console.log va logs\crash.log.
   echo Ban co the chay open_crash_logs.bat.
   pause
