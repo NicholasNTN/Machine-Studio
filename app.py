@@ -15,7 +15,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
 from PySide6.QtGui import (
     QDragEnterEvent, QDropEvent, QColor, QFont, QFontMetricsF,
-    QCloseEvent, QDesktopServices, QImage
+    QCloseEvent, QDesktopServices, QImage, QKeySequence, QShortcut
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
 from PySide6.QtWidgets import (
@@ -45,10 +45,14 @@ from ui.editor_workspace import EditorWorkspace
 from ui.inspector_panel import InspectorPanel
 from ui.media_panel import MediaPanel
 from ui.tool_panels import ActionListPanel
+from ui.settings_panel import SettingsPanel
+from ui.export_dialog import ExportDialog, sanitize_windows_name
+from ui.task_progress import TaskProgress
 from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle
+from editor.command_manager import TimelineSnapshotCommand
 
 
 APP_NAME = "Machine Studio"
@@ -680,11 +684,13 @@ class MainWindow(QMainWindow):
 
         bottom = QHBoxLayout()
         self.status_label = QLabel("Ready")
-        self.progress = QProgressBar()
+        self.status_label.hide()
+        self.progress = TaskProgress()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        bottom.addWidget(self.status_label)
-        bottom.addWidget(self.progress, 1)
+        self.progress.hide()
+        bottom.addStretch(1)
+        bottom.addWidget(self.progress)
         main.addLayout(bottom)
 
         self.app_shell = AppShell(content)
@@ -695,26 +701,29 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.app_shell)
 
     def _build_professional_editor_workspace(self):
-        """Mount legacy working widgets in the new selection-driven NLE shell."""
+        """Build the specialized repurposing workflow around existing controls."""
         self.media_panel = MediaPanel()
-        self.audio_tool_panel = ActionListPanel(
-            "Audio", ("+ Add Background Music", "+ Add Audio File"),
-            "Imported audio and AI narration appear here.",
-        )
-        self.text_tool_panel = ActionListPanel(
-            "Text", ("+ Add Text", "Get Subtitle From Voice", "Choose SRT"),
-            "Manual text and generated subtitles remain independent.",
-        )
-        self.blur_tool_panel = ActionListPanel(
-            "Blur", ("+ Add Blur Zone",), "No blur zones yet.",
-        )
-        self.logo_tool_panel = ActionListPanel(
-            "Logo", ("+ Add Logo / Image",), "No image overlays yet.",
-        )
+        self.voice_tool_panel = ActionListPanel("Voice", (), "Use the complete Voice settings on the right.")
+        self.subtitle_tool_panel = ActionListPanel("Phụ đề", (), "Use Subtitle & Translation settings on the right.")
+        self.blur_tool_panel = ActionListPanel("Blur", (), "Use complete Blur Zones settings on the right.")
+        self.customize_tool_panel = ActionListPanel("Tùy chỉnh", (), "Logo, watermark, and playback speed settings.")
+        self.advanced_tool_panel = ActionListPanel("Nâng cao", (), "Side background and overlay text settings.")
         self.context_inspector = InspectorPanel(self.editor_document.selection)
         self.context_inspector.propertyChanged.connect(
             self._apply_inspector_property
         )
+
+        voice_page = QWidget(); voice_layout = QVBoxLayout(voice_page); voice_layout.setContentsMargins(0, 0, 0, 0); voice_layout.addWidget(self.voice_settings_box); voice_layout.addWidget(self.voice_audio_strip)
+        media_settings = QLabel("Select a video clip for working clip settings. Media import and search stay on the left."); media_settings.setWordWrap(True); media_settings.setObjectName("hint")
+        self.settings_panel = SettingsPanel({
+            "media": media_settings,
+            "voice": voice_page,
+            "subtitle": self.subtitle_settings_box,
+            "blur": self.blur_settings_box,
+            "customize": self.customize_settings_box,
+            "advanced": self.advanced_settings_box,
+            "video_clip": self.context_inspector,
+        })
 
         self.media_panel.addFilesRequested.connect(self.add_files)
         self.media_panel.importFolderRequested.connect(self._import_media_folder)
@@ -722,27 +731,21 @@ class MainWindow(QMainWindow):
             lambda path: self.editor_add_paths([path])
         )
         self.thumbnail_service.ready.connect(self.media_panel.update_media_info)
-        self.audio_tool_panel.primaryRequested.connect(self.choose_music_file)
-        self.audio_tool_panel.secondaryRequested.connect(self._choose_audio_file)
-        self.text_tool_panel.primaryRequested.connect(self.editor_add_text_layer)
-        self.text_tool_panel.secondaryRequested.connect(self.get_sub_from_ai)
-        self.text_tool_panel.tertiaryRequested.connect(self.choose_sub)
-        self.blur_tool_panel.primaryRequested.connect(self.add_blur_zone)
         self.blur_tool_panel.itemSelected.connect(self._select_blur_from_tool)
-        self.logo_tool_panel.primaryRequested.connect(self.editor_add_image_layer)
-        self.logo_tool_panel.itemSelected.connect(self._select_image_from_tool)
 
         pages = {
             "media": self.media_panel,
-            "audio": self.audio_tool_panel,
-            "text": self.text_tool_panel,
+            "voice": self.voice_tool_panel,
+            "subtitle": self.subtitle_tool_panel,
             "blur": self.blur_tool_panel,
-            "logo": self.logo_tool_panel,
+            "customize": self.customize_tool_panel,
+            "advanced": self.advanced_tool_panel,
         }
         self.video_editor_tab = EditorWorkspace(
-            pages, self.legacy_preview_panel, self.context_inspector,
+            pages, self.legacy_preview_panel, self.settings_panel,
             self.editor_panel,
         )
+        self.video_editor_tab.toolSelected.connect(self.settings_panel.set_page)
         self.video_editor_tab.splitterSizesChanged.connect(self.schedule_autosave)
         self.editor_panel.setVisible(True)
         self.editor_panel.setTitle("Timeline")
@@ -775,13 +778,7 @@ class MainWindow(QMainWindow):
         self.media_panel.set_media(self.queue)
         for path in self.queue:
             self.thumbnail_service.request(path)
-        audio = []
-        for label, path in (("Background", self.music_file.text().strip()), ("AI narration", self.narration_path)):
-            if path: audio.append(f"{label}: {Path(path).name}")
-        self.audio_tool_panel.set_items(audio)
         self.blur_tool_panel.set_items([f"Blur {i + 1}" for i in range(len(self.blur_zones()))])
-        images = [layer for layer in self.editor_layers if layer.get("type") == "image"]
-        self.logo_tool_panel.set_items([Path(layer.get("path", "Image")).name for layer in images])
 
     def _select_blur_from_tool(self, index):
         if index < 0: return
@@ -862,26 +859,35 @@ class MainWindow(QMainWindow):
         if section == "menu":
             self.status("Machine Studio v1.1.0 PRO FOUNDATION")
             return
-        if section == "voiceover":
-            self.tabs.setCurrentIndex(0)
-            self.video_editor_tab.set_tool("audio")
-            self.top_bar.set_active(section)
-            self.status("Voiceover and audio tools")
-            return
         index = index_by_section.get(section)
         if index is not None:
             self.tabs.setCurrentIndex(index)
             self.top_bar.set_active(section)
 
     def _top_export(self):
-        self.tabs.setCurrentIndex(1)
-        if hasattr(self, "export_review_label"):
-            self.export_review_label.setText(
-                f"Canvas: {self.editor_document.aspect_ratio}  •  "
-                f"Audio: {'AI voice ready' if self.narration_path else 'source audio'}  •  "
-                f"Subtitles: {'ready' if self.sub_path.text().strip() else 'none'}"
-            )
-        self.status("Review export settings, then click Export Video to render.")
+        sources = list(self.queue) or [clip.get("path", "") for clip in self.editor_clips]
+        dialog = ExportDialog(
+            self.live_overlay.grab(), sources,
+            self.output_dir.text().strip() or str(ROOT / "exports"),
+            self.resolution.currentText(), self.codec.currentText(),
+            self.encoder.currentText(), self.strip_metadata.isChecked(), self,
+        )
+        if getattr(self, "export_name_override", ""):
+            dialog.name.setText(self.export_name_override)
+        for row in range(dialog.batch.rowCount()):
+            source_name = dialog.batch.item(row, 0).text()
+            if source_name in getattr(self, "batch_output_names", {}):
+                dialog.batch.item(row, 1).setText(self.batch_output_names[source_name])
+        self._last_export_dialog = dialog
+        if dialog.exec() != QDialog.Accepted: return
+        self.output_dir.setText(dialog.output_dir.text().strip())
+        self.resolution.setCurrentText(dialog.resolution.currentText())
+        self.codec.setCurrentText(dialog.codec.currentText())
+        self.encoder.setCurrentText(dialog.encoder.currentText())
+        self.strip_metadata.setChecked(dialog.strip_metadata.isChecked())
+        self.export_name_override = sanitize_windows_name(dialog.name.text())
+        self.batch_output_names = dialog.batch_names()
+        self.export_batch()
 
     # ------------------------------------------------------------------
     # VIDEO EXPORTER
@@ -1037,6 +1043,7 @@ class MainWindow(QMainWindow):
 
         # BLUR ZONES
         blur = QGroupBox("Blur zones")
+        self.blur_settings_box = blur
         bg = QGridLayout(blur)
         self.blur_enabled = QCheckBox("Bật")
         self.blur_style = QComboBox()
@@ -1116,10 +1123,10 @@ class MainWindow(QMainWindow):
         zr.addWidget(add_zone); zr.addWidget(edit_zone); zr.addWidget(remove_zone)
         zr.addStretch(1)
         bg.addLayout(zr, 7, 0, 1, 2)
-        ll.addWidget(blur)
 
         # SPEED + LOGO
         advanced = QGroupBox("Tùy chỉnh")
+        self.customize_settings_box = advanced
         ag = QGridLayout(advanced)
 
         self.speed_enabled = QCheckBox("Tốc độ phát")
@@ -1170,10 +1177,10 @@ class MainWindow(QMainWindow):
         ag.addWidget(self.logo_remove_bg, 4, 0, 1, 2)
         ag.addWidget(self.logo_params_toggle, 5, 0, 1, 2)
         ag.addWidget(self.logo_params_panel, 6, 0, 1, 2)
-        ll.addWidget(advanced)
 
         # "CÀI ĐẶT NÂNG CAO" chỉ còn NỀN 2 BÊN + CHỮ PHỦ.
         extra = QGroupBox("Cài Đặt Nâng Cao")
+        self.advanced_settings_box = extra
         xg = QVBoxLayout(extra)
 
         side = QGroupBox("Nền 2 bên")
@@ -1222,7 +1229,6 @@ class MainWindow(QMainWindow):
         og.addWidget(self.overlay_params_panel, 7, 0, 1, 2)
         xg.addWidget(overlay)
 
-        ll.addWidget(extra)
         ll.addStretch(1)
 
         # ==============================================================
@@ -1359,6 +1365,7 @@ class MainWindow(QMainWindow):
 
         # Preview / final mix audio controls like reference.
         audio_strip = QFrame()
+        self.voice_audio_strip = audio_strip
         audio_strip.setObjectName("audioStrip")
         ar = QHBoxLayout(audio_strip)
         ar.setContentsMargins(8, 5, 8, 5)
@@ -1392,7 +1399,6 @@ class MainWindow(QMainWindow):
         ar.addWidget(self.source_volume_label); ar.addWidget(self.source_volume)
         ar.addWidget(self.narration_volume_label); ar.addWidget(self.narration_volume)
         ar.addWidget(self.music_volume_label); ar.addWidget(self.music_volume)
-        cl.addWidget(audio_strip)
 
         # ==============================================================
         # RIGHT: VOICE FIRST -> SUB/DỊCH SECOND
@@ -1408,6 +1414,7 @@ class MainWindow(QMainWindow):
 
         # Voice first.
         voice_box = QGroupBox("🔑 Lồng Tiếng (TTS)")
+        self.voice_settings_box = voice_box
         vg = QGridLayout(voice_box)
 
         self.script_ready_label = QLabel("Kịch bản AI: chưa có")
@@ -1540,10 +1547,10 @@ class MainWindow(QMainWindow):
         vg.addWidget(self.voice_status, 10, 0, 1, 4)
 
         QTimer.singleShot(0, self.on_tts_engine_changed)
-        rl.addWidget(voice_box)
 
         # Subtitle + translation second.
         sub_box = QGroupBox("Setting Sub & Dịch")
+        self.subtitle_settings_box = sub_box
         sg = QVBoxLayout(sub_box)
 
         self.sub_enabled = QCheckBox("Bật phụ đề")
@@ -1803,7 +1810,6 @@ class MainWindow(QMainWindow):
         self.sub_editor.textChanged.connect(self.preview_cues_from_editor)
         sg.addWidget(self.sub_editor, 1)
 
-        rl.addWidget(sub_box)
 
         capcut = QGroupBox("CapCut Bridge")
         cg = QVBoxLayout(capcut)
@@ -1930,11 +1936,16 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _build_basic_editor_panel(self, parent_layout):
         self.editor_panel = QGroupBox("✂ Basic Video Editor")
-        self.editor_panel.setMinimumHeight(125)
+        self.editor_panel.setMinimumHeight(130)
         layout = QVBoxLayout(self.editor_panel)
         layout.setSpacing(5)
 
         header = QHBoxLayout()
+        undo_button = QPushButton("↶ Undo"); undo_button.clicked.connect(self.editor_document.commands.stack.undo)
+        redo_button = QPushButton("↷ Redo"); redo_button.clicked.connect(self.editor_document.commands.stack.redo)
+        self.undo_shortcut = QShortcut(QKeySequence.Undo, self); self.undo_shortcut.activated.connect(self.editor_document.commands.stack.undo)
+        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Z"), self); self.redo_shortcut.activated.connect(self.editor_document.commands.stack.redo)
+        self.redo_windows_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self); self.redo_windows_shortcut.activated.connect(self.editor_document.commands.stack.redo)
         self.editor_use_timeline = QCheckBox("Dùng timeline khi Xuất Video")
         self.editor_use_timeline.setToolTip(
             "Bật: Xuất Video sẽ render các clip theo đúng thứ tự/trim trên timeline."
@@ -1971,6 +1982,7 @@ class MainWindow(QMainWindow):
         preview_timeline.setObjectName("cyan")
         preview_timeline.clicked.connect(self.editor_render_preview)
 
+        header.addWidget(undo_button); header.addWidget(redo_button)
         header.addWidget(self.editor_use_timeline)
         header.addWidget(add_file)
         header.addWidget(add_queue)
@@ -1994,7 +2006,7 @@ class MainWindow(QMainWindow):
         self.editor_timeline_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarAlwaysOff
         )
-        self.editor_timeline_scroll.setMinimumHeight(140)
+        self.editor_timeline_scroll.setMinimumHeight(105)
         self.editor_timeline = BasicTimelineWidget()
         self.editor_timeline_scroll.setWidget(self.editor_timeline)
 
@@ -2065,11 +2077,13 @@ class MainWindow(QMainWindow):
         cp.addWidget(self.editor_playhead_label)
         cp.addWidget(self.editor_total_label)
         layout.addWidget(clip_props)
+        clip_props.setVisible(False)
 
         # --------------------------------------------------------------
         # LAYERS — compact by default; properties expand only when needed.
         # --------------------------------------------------------------
         layers_box = QGroupBox("Layers trên Preview")
+        layers_box.setVisible(False)
         lg = QVBoxLayout(layers_box)
         lg.setSpacing(4)
 
@@ -2392,6 +2406,11 @@ class MainWindow(QMainWindow):
         if item is None: return
         group_id = item.group_id if kind == "subtitle" else ""
         self.editor_document.selection.select(kind, item_id, group_id)
+        if kind == "video": self.settings_panel.set_page("video_clip")
+        elif kind == "subtitle": self.settings_panel.set_page("subtitle")
+        elif kind == "blur": self.settings_panel.set_page("blur")
+        elif kind in ("image", "logo"): self.settings_panel.set_page("customize")
+        elif kind == "text": self.settings_panel.set_page("advanced")
         self.editor_timeline.set_selected_item(item_id)
         if kind in ("text", "image", "logo"):
             index = next((i for i, layer in enumerate(self.editor_layers) if layer.get("id") == item_id), -1)
@@ -2417,6 +2436,7 @@ class MainWindow(QMainWindow):
         self.editor_selected_clip = int(index)
         self.editor_timeline.set_selected(index)
         clip = self.editor_clips[index]
+        if hasattr(self, "settings_panel"): self.settings_panel.set_page("video_clip")
         self.editor_document.selection.select("video", str(clip.get("id", "")))
         if hasattr(self, "context_inspector"):
             self.context_inspector.load_properties("video", clip)
@@ -2495,6 +2515,7 @@ class MainWindow(QMainWindow):
     def editor_clip_trim_changed(self, index, source_start, source_end):
         if not (0 <= index < len(self.editor_clips)):
             return
+        before = [dict(clip) for clip in self.editor_clips]
         old_clip = self.editor_clips[index]
         source_now = float(old_clip.get("source_start", 0.0))
         try:
@@ -2519,7 +2540,18 @@ class MainWindow(QMainWindow):
         self.editor_refresh_all()
         self.editor_clip_selected(index, seek=False)
         self.editor_seek_clip(index, source_now, autoplay=False)
+        self._push_timeline_undo("Trim clip", before)
         self.schedule_autosave()
+
+    def _apply_timeline_snapshot(self, clips):
+        self.editor_clips[:] = [dict(clip) for clip in clips]
+        self.editor_selected_clip = min(self.editor_selected_clip, len(self.editor_clips) - 1)
+        self.editor_refresh_all(); self.schedule_autosave()
+
+    def _push_timeline_undo(self, label, before):
+        after = [dict(clip) for clip in self.editor_clips]
+        if before != after:
+            self.editor_document.commands.execute(TimelineSnapshotCommand(label, before, after, self._apply_timeline_snapshot))
 
     def editor_clip_numeric_trim_changed(self, *args):
         index = self.editor_selected_clip
@@ -2547,6 +2579,7 @@ class MainWindow(QMainWindow):
     def editor_clip_reordered(self, source_index, target_index):
         if 0 <= source_index < len(self.editor_clips) and self.editor_clips[source_index].get("locked", False):
             self.status("Clip is locked."); return
+        before = [dict(clip) for clip in self.editor_clips]
         new_index = editor_engine.reorder_clip(
             self.editor_clips,
             source_index,
@@ -2554,6 +2587,7 @@ class MainWindow(QMainWindow):
         )
         self.editor_selected_clip = new_index
         self.editor_refresh_all()
+        self._push_timeline_undo("Reorder clips", before)
         self.schedule_autosave()
 
     def editor_move_clip(self, delta):
@@ -2591,6 +2625,7 @@ class MainWindow(QMainWindow):
                 + editor_engine.clip_duration(clip) / 2.0
             )
         try:
+            before = [dict(item) for item in self.editor_clips]
             new_index = editor_engine.split_clip(
                 self.editor_clips,
                 index,
@@ -2599,6 +2634,7 @@ class MainWindow(QMainWindow):
             self.editor_selected_clip = new_index
             self.editor_refresh_all()
             self.editor_clip_selected(new_index)
+            self._push_timeline_undo("Split clip", before)
             self.schedule_autosave()
         except Exception as e:
             QMessageBox.warning(self, "Split", str(e))
@@ -2609,6 +2645,7 @@ class MainWindow(QMainWindow):
             return
         if self.editor_clips[index].get("locked", False):
             self.status("Clip is locked."); return
+        before = [dict(clip) for clip in self.editor_clips]
         self.editor_clips.pop(index)
         self.editor_selected_clip = min(
             index,
@@ -2617,15 +2654,19 @@ class MainWindow(QMainWindow):
         self.editor_refresh_all()
         if self.editor_selected_clip >= 0:
             self.editor_clip_selected(self.editor_selected_clip)
+        self._push_timeline_undo("Delete clip", before)
         self.schedule_autosave()
 
     def editor_set_in_at_playhead(self):
         i = self.editor_selected_clip
         if not (0 <= i < len(self.editor_clips)):
             return
+        if self.editor_clips[i].get("locked", False):
+            self.status("Clip is locked."); return
         clip = self.editor_clips[i]
         pos = self.player.position() / 1000.0
         try:
+            before = [dict(item) for item in self.editor_clips]
             self.editor_clips[i] = editor_engine.trim_clip(
                 clip,
                 pos,
@@ -2638,6 +2679,7 @@ class MainWindow(QMainWindow):
                 float(self.editor_clips[i].get("source_start", 0.0)),
                 autoplay=False,
             )
+            self._push_timeline_undo("Set IN", before)
             self.schedule_autosave()
         except Exception as e:
             QMessageBox.warning(self, "Trim IN", str(e))
@@ -2646,9 +2688,12 @@ class MainWindow(QMainWindow):
         i = self.editor_selected_clip
         if not (0 <= i < len(self.editor_clips)):
             return
+        if self.editor_clips[i].get("locked", False):
+            self.status("Clip is locked."); return
         clip = self.editor_clips[i]
         pos = self.player.position() / 1000.0
         try:
+            before = [dict(item) for item in self.editor_clips]
             self.editor_clips[i] = editor_engine.trim_clip(
                 clip,
                 float(clip.get("source_start", 0.0)),
@@ -2667,6 +2712,7 @@ class MainWindow(QMainWindow):
                 ),
                 autoplay=False,
             )
+            self._push_timeline_undo("Set OUT", before)
             self.schedule_autosave()
         except Exception as e:
             QMessageBox.warning(self, "Trim OUT", str(e))
@@ -4029,6 +4075,7 @@ class MainWindow(QMainWindow):
             return
 
         self.status(title)
+        self.progress.setTask(title)
         self.progress.setRange(0, 0)
         worker = Worker(fn)
         self.worker = worker
@@ -4059,6 +4106,7 @@ class MainWindow(QMainWindow):
     def worker_error(self, tb):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
+        self.progress.hide()
         self.status("Error")
 
         markers = [
@@ -5516,6 +5564,7 @@ class MainWindow(QMainWindow):
             self.editor_timeline.set_selected_item("")
             return
         if kind == "blur" and index >= 0:
+            self.settings_panel.set_page("blur")
             self.editor_document.selection.select("blur", f"blur:{index}")
             self.editor_timeline.set_selected_item(f"blur:{index}")
             zones = self.all_live_blur_zones()
@@ -5524,13 +5573,16 @@ class MainWindow(QMainWindow):
                 self.blur_zone_list.setCurrentRow(row)
             self.blur_params_toggle.setChecked(True)
         elif kind == "sub":
+            self.settings_panel.set_page("subtitle")
             self.editor_document.selection.select("subtitle", "subtitle", self._current_subtitle_group_id())
             self.sub_params_toggle.setChecked(True)
         elif kind == "logo":
+            self.settings_panel.set_page("customize")
             self.editor_document.selection.select("logo", "primary-logo")
             self.context_inspector.load_properties("logo", {"x": self.logo_x.value(), "y": self.logo_y.value(), "scale": self.logo_scale.value(), "opacity": self.logo_opacity.value()})
             self.logo_params_toggle.setChecked(True)
         elif kind == "text":
+            self.settings_panel.set_page("advanced")
             self.editor_document.selection.select("text", "primary-overlay-text")
             self.context_inspector.load_properties("text", {"text": self.overlay_text.text(), "font_name": self.overlay_font.currentFont().family(), "font_size": self.overlay_size.value(), "x": self.overlay_x.value(), "y": self.overlay_y.value(), "opacity": 100})
             self.overlay_params_toggle.setChecked(True)
@@ -6927,6 +6979,8 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "video_editor_tab") else {}
             ),
             "editor_tracks": [track.to_dict() for track in self.editor_document.timeline.tracks],
+            "export_name": getattr(self, "export_name_override", ""),
+            "batch_output_names": dict(getattr(self, "batch_output_names", {})),
             "editor_visible": bool(
                 hasattr(self, "editor_panel")
                 and self.editor_panel.isVisible()
@@ -7103,6 +7157,8 @@ class MainWindow(QMainWindow):
         self.editor_document.restore_subtitle_groups(data.get("subtitle_groups", {}))
         if isinstance(data.get("editor_tracks"), list):
             self.editor_document.timeline.restore_tracks(data["editor_tracks"])
+        self.export_name_override = str(data.get("export_name", "") or "")
+        self.batch_output_names = dict(data.get("batch_output_names", {}) or {})
         if hasattr(self, "preview_ratio_combo"):
             self.preview_ratio_combo.setCurrentText(ratio)
         if hasattr(self, "video_editor_tab") and isinstance(data.get("workspace_splitter_sizes"), dict):
@@ -7301,7 +7357,13 @@ class MainWindow(QMainWindow):
 
             def next_target(source_path):
                 stem = Path(source_path).stem
-                base = out_dir / f"{stem}_MS.mp4"
+                custom_name = False
+                if getattr(self, "batch_output_names", None):
+                    mapped = self.batch_output_names.get(Path(source_path).name)
+                    if mapped: stem = mapped; custom_name = True
+                if getattr(self, "export_name_override", "") and (len(self.queue) <= 1 or "MachineStudio_Timeline" in source_path):
+                    stem = self.export_name_override; custom_name = True
+                base = out_dir / f"{stem}{'' if custom_name else '_MS'}.mp4"
                 if not base.exists():
                     return base
                 for n in range(2, 1000):

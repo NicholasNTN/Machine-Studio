@@ -9,10 +9,8 @@ class TopBar(QFrame):
     exportRequested = Signal()
 
     SECTIONS = (
-        ("menu", "Menu"),
         ("editor", "Video Editor"),
         ("ai", "AI Studio"),
-        ("voiceover", "Voiceover"),
         ("download", "Download"),
         ("settings", "Settings"),
     )

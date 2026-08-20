@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBo
 class InspectorPanel(QFrame):
     """Selection-driven inspector; controls edit the canonical selected object."""
     propertyChanged = Signal(str, object)
-    KINDS = ("video", "audio", "text", "subtitle", "blur", "image", "logo")
+    KINDS = ("video",)
 
     def __init__(self, selection_manager=None, parent=None):
         super().__init__(parent); self.setObjectName("inspectorPanel"); self.setMinimumWidth(280); self._loading = False; self._controls = {}
@@ -21,7 +21,6 @@ class InspectorPanel(QFrame):
 
     def _disable_unavailable_controls(self):
         unavailable = {
-            "video": ("x", "y", "scale", "rotation", "opacity", "fit_mode"),
             "audio": ("fade_in", "fade_out"),
             "text": ("bold", "italic", "underline", "alignment", "scale", "rotation", "stroke_width", "stroke_color", "background", "shadow", "shadow_blur", "shadow_x", "shadow_y", "character_spacing", "line_spacing"),
             "subtitle": ("underline", "alignment", "scale", "rotation", "opacity", "shadow_blur", "shadow_x", "shadow_y", "character_spacing", "line_spacing"),
@@ -43,7 +42,7 @@ class InspectorPanel(QFrame):
     def _make_page(self, kind):
         scroll = QScrollArea(); scroll.setWidgetResizable(True); body = QWidget(); form = QFormLayout(body)
         heading = QLabel("Image / Logo" if kind in ("image", "logo") else kind.title()); heading.setObjectName("inspectorHeading"); form.addRow(heading)
-        if kind in ("video", "audio", "text", "subtitle"):
+        if kind in ("audio", "text", "subtitle"):
             notice = QLabel("Disabled controls are Coming next and do not affect the project.")
             notice.setObjectName("hint"); notice.setWordWrap(True); form.addRow(notice)
         if kind in ("text", "subtitle"):
@@ -55,10 +54,8 @@ class InspectorPanel(QFrame):
             align = QComboBox(); align.addItems(["Left", "Center", "Right"]); self._bind(kind, "alignment", align, "currentTextChanged", lambda w: w.currentText().lower()); form.addRow("Alignment", align)
             for args in (("stroke_width", "Stroke width", 0, 20, 0), ("shadow_blur", "Shadow blur", 0, 50, 0), ("shadow_x", "Shadow X", -100, 100, 0), ("shadow_y", "Shadow Y", -100, 100, 0), ("character_spacing", "Character spacing", -20, 100, 0), ("line_spacing", "Line spacing", 50, 300, 100)): self._spin(form, kind, *args)
             self._line(form, kind, "stroke_color", "Stroke color", "#000000"); self._line(form, kind, "background", "Background", "transparent"); self._check(form, kind, "shadow", "Shadow")
-        if kind in ("video", "text", "subtitle", "image", "logo"):
+        if kind in ("text", "subtitle", "image", "logo"):
             for args in (("x", "Position X", -200, 200, 50), ("y", "Position Y", -200, 200, 50), ("scale", "Scale", 1, 500, 100), ("rotation", "Rotation", -360, 360, 0), ("opacity", "Opacity", 0, 100, 100)): self._double(form, kind, *args)
-        if kind == "video":
-            fit = QComboBox(); fit.addItems(["Fit", "Fill"]); self._bind(kind, "fit_mode", fit, "currentTextChanged", lambda w: w.currentText()); form.addRow("Canvas", fit)
         if kind in ("video", "audio"):
             self._double(form, kind, "volume", "Volume", 0, 200, 100); self._check(form, kind, "muted", "Mute")
         if kind == "audio":

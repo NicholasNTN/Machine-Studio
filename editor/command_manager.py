@@ -29,3 +29,12 @@ class CommandManager:
 
     def clear(self) -> None:
         self.stack.clear()
+
+
+class TimelineSnapshotCommand(QUndoCommand):
+    """Undoable replacement of the legacy clip list during migration."""
+    def __init__(self, text, before, after, apply_callback):
+        super().__init__(text); self.before = [dict(item) for item in before]; self.after = [dict(item) for item in after]; self.apply_callback = apply_callback
+
+    def undo(self): self.apply_callback(self.before)
+    def redo(self): self.apply_callback(self.after)

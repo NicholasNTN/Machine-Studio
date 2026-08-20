@@ -17,13 +17,7 @@ class BasicTimelineWidget(QWidget):
     mediaDropped = Signal(str, float, str)
     HEADER_WIDTH = 132.0
 
-    TRACKS = (
-        ("text", "Text"),
-        ("subtitle", "Subtitles"),
-        ("effect", "Effects / Blur"),
-        ("video", "Video"),
-        ("audio", "Audio / AI Voice"),
-    )
+    TRACKS = (("video", "Video"),)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,7 +33,7 @@ class BasicTimelineWidget(QWidget):
         self.drag_index = -1
         self.temp_start = None
         self.temp_end = None
-        self.setMinimumHeight(246)
+        self.setMinimumHeight(96)
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
 
@@ -83,7 +77,7 @@ class BasicTimelineWidget(QWidget):
         )
         width = max(700, int(70 + duration * self.zoom))
         self.setMinimumWidth(width)
-        self.resize(width, max(246, self.height()))
+        self.resize(width, max(96, self.height()))
 
     def _track_top(self, kind):
         index = next((i for i, (key, _) in enumerate(self.TRACKS) if key == kind), 3)
@@ -109,16 +103,7 @@ class BasicTimelineWidget(QWidget):
         return rects
 
     def _item_rects(self):
-        rects = []
-        for item in self.timeline_items:
-            kind = getattr(getattr(item, "kind", "effect"), "value", getattr(item, "kind", "effect"))
-            if kind == "video":
-                continue
-            lane = "effect" if kind in ("effect", "blur") else "text" if kind in ("image", "logo") else kind
-            start = float(getattr(item, "start", 0.0)); end = float(getattr(item, "end", start))
-            rect = QRectF(self.HEADER_WIDTH + 1.0 + start * self.zoom, self._track_top(lane) + 4.0, max(5.0, (end - start) * self.zoom), 31.0)
-            rects.append((item, rect, lane))
-        return rects
+        return []
 
     def _time_at_x(self, x):
         total = max(editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))

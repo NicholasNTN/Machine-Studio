@@ -4,7 +4,8 @@ from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QS
 
 class EditorWorkspace(QWidget):
     splitterSizesChanged = Signal()
-    TOOLS = (("media", "▣", "Media"), ("audio", "♫", "Audio"), ("text", "T", "Text"), ("blur", "◉", "Blur"), ("logo", "◆", "Logo"))
+    toolSelected = Signal(str)
+    TOOLS = (("media", "▣", "Media"), ("voice", "♫", "Voice"), ("subtitle", "CC", "Phụ đề"), ("blur", "◉", "Blur"), ("customize", "◆", "Tùy chỉnh"), ("advanced", "⚙", "Nâng cao"))
 
     def __init__(self, pages, preview, inspector, timeline, parent=None):
         super().__init__(parent); root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0)
@@ -18,7 +19,7 @@ class EditorWorkspace(QWidget):
         for page in pages.values(): self.page_stack.addWidget(page)
         group = QButtonGroup(self); group.setExclusive(True)
         for index, (key, icon, label) in enumerate(self.TOOLS):
-            button = QPushButton(f"{icon}\n{label}"); button.setObjectName("toolButton"); button.setCheckable(True); button.setFixedSize(58, 58); button.clicked.connect(lambda checked=False, i=index: self.page_stack.setCurrentIndex(i)); group.addButton(button); nav_layout.addWidget(button)
+            button = QPushButton(f"{icon}\n{label}"); button.setObjectName("toolButton"); button.setCheckable(True); button.setFixedSize(62, 60); button.clicked.connect(lambda checked=False, i=index, k=key: (self.page_stack.setCurrentIndex(i), self.toolSelected.emit(k))); group.addButton(button); nav_layout.addWidget(button)
             self._tool_buttons[key] = button
             if index == 0: button.setChecked(True)
         nav_layout.addStretch(1); left_layout.addWidget(nav); left_layout.addWidget(self.page_stack, 1)
@@ -34,6 +35,7 @@ class EditorWorkspace(QWidget):
         if key not in self._tool_indexes: return False
         self.page_stack.setCurrentIndex(self._tool_indexes[key])
         self._tool_buttons[key].setChecked(True)
+        self.toolSelected.emit(key)
         return True
     def restore_sizes(self, values):
         if values.get("workspace_horizontal"): self.horizontal_splitter.setSizes(values["workspace_horizontal"])
