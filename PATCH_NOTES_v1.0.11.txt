@@ -1,0 +1,45 @@
+MachineScope Studio v1.0.11 — WORD POP SYNC
+
+NEW SUBTITLE EFFECT
+Word Pop Sync
+
+WHAT IT DOES
+- Narration reaches word A -> only word A is visible.
+- Word A disappears as word B begins.
+- Every new word starts slightly smaller, pops to ~108%, then settles to 100%.
+- Tiny fade-in/fade-out makes the hand-off between words smooth.
+- Voice silence remains subtitle silence.
+
+TIMING METHOD
+- Uses the REAL generated TTS audio duration.
+- Uses FFmpeg silencedetect to preserve actual pauses.
+- Distributes individual words inside each audible speech interval.
+- Longer words receive slightly more display time.
+- Punctuation gets a small timing weight.
+- Does not call another AI API and does not add a heavy speech recognizer.
+
+UI
+Effect:
+  Word Pop Sync
+
+Controls:
+  Word Pop: 108%
+  Pop smooth: 110 ms
+
+Recommended:
+  Word Pop 106-110%
+  Pop smooth 90-130 ms
+  Hide subtitle on voice pause: ON
+  Pause >= 220 ms
+
+MODE SWITCHING
+- Select Word Pop Sync -> app automatically generates subtitle_word_pop_en.srt.
+- Switch back to another effect -> app rebuilds normal phrase subtitle from
+  the same voice_manifest when the current subtitle came from Word Pop Sync.
+
+IMPORTANT
+This is real voice-duration + silence-aware synchronization. Because Gemini/Piper
+TTS do not provide phoneme/word timestamps in this workflow, exact word boundary
+timing is estimated intelligently inside the real speech duration. It is much
+closer to CapCut-style word captions than sentence timing without adding another
+slow AI/ASR stage.

@@ -1,0 +1,64 @@
+{
+  "speech_intervals": [
+    [
+      0.0,
+      0.65
+    ],
+    [
+      0.9701,
+      1.72
+    ]
+  ],
+  "word_cues": [
+    [
+      0.0,
+      0.2015,
+      "This"
+    ],
+    [
+      0.2015,
+      0.4151,
+      "giant"
+    ],
+    [
+      0.4151,
+      0.65,
+      "machine"
+    ],
+    [
+      0.9701,
+      1.2069,
+      "moves"
+    ],
+    [
+      1.2069,
+      1.4968,
+      "incredibly"
+    ],
+    [
+      1.4968,
+      1.72,
+      "fast"
+    ]
+  ],
+  "real_gap_preserved": true,
+  "srt_word_count": 6,
+  "srt_words": [
+    "This",
+    "giant",
+    "machine",
+    "moves",
+    "incredibly",
+    "fast"
+  ],
+  "ass_dialogues": 6,
+  "ass_has_pop_scale": true,
+  "ass_has_transform": true,
+  "ass_has_fade": true,
+  "effect_in_ui": true,
+  "auto_regenerate": true,
+  "live_pop": true,
+  "word_by_word_export": true,
+  "version": "1.0.11 WORD POP SYNC BETA",
+  "syntax": "OK"
+}

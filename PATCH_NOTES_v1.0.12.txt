@@ -1,0 +1,107 @@
+MachineScope Studio v1.0.12 — BASIC VIDEO EDITOR
+
+EDITOR PANEL
+- Nút: ✂ Video Editor / ✂ Ẩn Editor
+- Editor ẩn mặc định để giao diện Video Exporter vẫn gọn.
+- Checkbox: Dùng timeline khi Xuất Video.
+
+VIDEO TIMELINE
+- + Video: thêm 1 hoặc nhiều video trực tiếp vào timeline.
+- + Từ danh sách trên: đưa video đang chọn trong batch queue vào timeline.
+- Nhiều video được ghép theo thứ tự timeline.
+- Kéo thân clip sang trái/phải để đổi thứ tự.
+- Kéo mép vàng trái/phải để Trim IN / OUT.
+- Trim là non-destructive, có thể kéo ngược ra để lấy lại phần video gốc.
+- Split tại vị trí Preview/playhead.
+- Xóa đoạn: sau Split, chọn segment rồi xóa.
+- Đặt IN: xóa logic phần trước playhead.
+- Đặt OUT: xóa logic phần sau playhead.
+- Numeric IN/OUT cho chỉnh chính xác đến mili-giây.
+- Zoom timeline.
+- Playhead timeline.
+- Playback đi qua OUT của clip và tự sang clip kế tiếp.
+- Clip cuối dừng đúng OUT.
+- Preview Timeline: render proxy nhẹ của toàn bộ trim/split/reorder/merge.
+
+FINAL EXPORT
+- Nếu "Dùng timeline khi Xuất Video" bật:
+  1. render toàn bộ timeline đã edit;
+  2. đưa timeline đã ghép qua Video Exporter;
+  3. áp blur/logo/sub/text/image/audio;
+  4. xuất MP4 cuối.
+- Hỗ trợ clip nguồn khác resolution/aspect ratio.
+- Timeline chuẩn hóa video + audio bằng FFmpeg concat filter.
+
+LAYERS TRÊN PREVIEW
+- Multiple Text layers.
+- Multiple Image/Sticker/Logo layers.
+- Subtitle hiện tại.
+- Logo/Watermark hiện tại.
+- Chữ phủ hiện tại.
+- Multiple Blur zones.
+- Layer list hỗ trợ Thêm / Sửa / Xóa.
+
+MULTIPLE TEXT
+- Nội dung.
+- Font.
+- Màu.
+- X/Y.
+- Cỡ chữ.
+- Opacity.
+- Start/End trên timeline.
+- Kéo trực tiếp trên Preview.
+- Kéo handle góc phải để resize.
+
+MULTIPLE IMAGE
+- PNG/JPG/JPEG/WebP/BMP.
+- X/Y.
+- Scale.
+- Opacity.
+- Start/End trên timeline.
+- Kéo trực tiếp trên Preview.
+- Kéo handle góc phải để resize.
+- Final export dùng timed FFmpeg overlay.
+
+SAVE PROJECT
+- editor_clips
+- source_start/source_end
+- thứ tự clip
+- editor_layers
+- layer timing/geometry
+- trạng thái "Dùng timeline khi xuất"
+đều lưu trong Project/Autosave.
+
+QUY TRÌNH KHUYẾN NGHỊ
+Video thô
+  -> Basic Video Editor: cắt/ghép/trim
+  -> AI Studio
+  -> Voice
+  -> Subtitle
+  -> Layer/Text/Logo/Blur
+  -> Export
+
+Nếu cắt/ghép video SAU khi đã tạo Voice/Sub thì voice/sub cũ có thể không còn đúng
+timeline mới. Vì vậy nên hoàn thiện cấu trúc video trước bước AI/Voice.
+
+TEST BUILD
+- Render 3 video nguồn khác aspect ratio.
+- Trim.
+- Split + xóa segment.
+- Reorder.
+- Merge timeline.
+- 2 text layers + 1 image layer.
+- Final MP4 export.
+- Timeline expected: 4.20s.
+- Timeline rendered: 4.20s.
+- Final output: ~4.20s.
+- Python syntax: PASS.
+
+CHƯA PHẢI FULL CAPCUT
+v1.0.12 tập trung vào editor cơ bản. Chưa có:
+- Transition giữa clip.
+- Keyframe animation.
+- Speed ramp.
+- Crop/rotate riêng từng clip.
+- Multi-track audio waveform.
+- Undo/Redo history.
+Các phần này có thể thêm theo version sau mà không đổi cấu trúc project hiện tại.

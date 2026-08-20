@@ -1,0 +1,31 @@
+MachineScope Studio v0.5 FAST & SIMPLE BETA
+
+MỤC TIÊU
+- Rút AI Studio xuống còn: Chọn video -> AI hiểu + viết script -> Tạo Voice -> Export.
+- Không còn bắt người dùng chạy 2A / 2B / 2C / bước 3 riêng.
+- Tối ưu Video Exporter thành các nút nhanh; phần chi tiết nằm sau nút Nâng cao.
+
+TỐI ƯU TỐC ĐỘ AI
+- Tự lấy frame đại diện theo độ dài video:
+  <=30s: khoảng 6 frame
+  <=90s: khoảng 8 frame
+  <=4 phút: khoảng 10 frame
+  dài hơn: khoảng 12 frame
+- Frame giảm xuống width 720px.
+- Chỉ 1 request Gemini cho: hiểu hình + OCR chữ Trung + hiểu nội dung + viết script.
+- Audio nguồn mặc định KHÔNG gửi lên AI.
+- Có checkbox "Nghe lời nói nguồn (chậm hơn)" khi cần.
+- Chế độ Nhanh dùng gemini-3.1-flash-lite.
+- Chế độ Chất lượng dùng model trong Settings.
+- Gemini request timeout 90 giây để tránh treo 20-30 phút.
+
+VIDEO EXPORTER GỌN
+- Nút Gốc / 9:16 / 16:9 / 1:1
+- Nút Tắt âm gốc
+- Nút Phụ đề
+- Nút Kiểu phụ đề
+- Nút Voice AI
+- Nút Auto Zoom
+- Nút Logo
+- Nút Nâng cao
+- Tất cả chức năng v0.4 vẫn được giữ trong phần Nâng cao.

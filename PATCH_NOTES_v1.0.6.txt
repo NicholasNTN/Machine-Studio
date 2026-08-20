@@ -1,0 +1,33 @@
+MachineScope Studio v1.0.6 — MULTI AI + CKEY
+
+AI Provider:
+○ Google Gemini
+● CKEY
+○ OpenAI
+○ DeepSeek
+
+CKEY defaults:
+- API Key: sk-xxxxxxxx
+- Base URL: https://api.xah.io/v1
+- Model: levuphong2909/gemini-3.7-flash-high
+- Endpoint: POST https://api.xah.io/v1/chat/completions
+
+Routing:
+- AI Studio: Provider đang chọn.
+- Dịch Sub: Provider đang chọn.
+- CKEY/OpenAI/DeepSeek: OpenAI-compatible Chat Completions.
+- Google Gemini: giữ Google GenAI SDK.
+
+Multimodal:
+- CKEY/OpenAI-compatible fast analysis gửi frame dưới dạng
+  image_url data:image/jpeg;base64,...
+- Không còn hard-code model Gemini Flash-Lite khi Provider = CKEY.
+
+TTS:
+- Gemini TTS có Google TTS API Key riêng.
+- Edge TTS / Windows SAPI không cần Google key.
+- CKEY chat/completions không bị dùng nhầm làm TTS.
+
+Secrets:
+- Mỗi provider key lưu riêng trong Windows keyring.
+- settings.json chỉ lưu provider/model/base URL, không lưu API key plaintext.

@@ -1,0 +1,10 @@
+{
+  "syntax": "OK",
+  "edge_tts_dependency": true,
+  "auto_fallback_checkbox": true,
+  "quota_detector": true,
+  "default_edge_fallback_voice": "en-US-JennyNeural",
+  "fallback_keeps_timeline": true,
+  "fallback_keeps_synced_srt": true,
+  "fallback_manifest_metadata": true
+}

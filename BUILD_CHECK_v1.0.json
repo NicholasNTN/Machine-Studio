@@ -1,0 +1,22 @@
+{
+  "app.py": "syntax_ok",
+  "live_overlay.py": "syntax_ok",
+  "__init__.py": "syntax_ok",
+  "downloader.py": "syntax_ok",
+  "ffmpeg_engine.py": "syntax_ok",
+  "gemini_engine.py": "syntax_ok",
+  "models.py": "syntax_ok",
+  "preset_store.py": "syntax_ok",
+  "settings_store.py": "syntax_ok",
+  "subtitle_detector.py": "syntax_ok",
+  "subtitle_engine.py": "syntax_ok",
+  "system_info.py": "syntax_ok",
+  "tts_engine.py": "syntax_ok",
+  "vocal_separator.py": "syntax_ok",
+  "uses_QVideoSink": true,
+  "QVideoWidget_removed": true,
+  "videoFrameChanged_connected": true,
+  "live_frame_paint": true,
+  "live_realtime_blur": true,
+  "final_export_still_present": true
+}

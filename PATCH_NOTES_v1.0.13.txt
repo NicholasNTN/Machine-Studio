@@ -1,0 +1,123 @@
+MachineScope Studio v1.0.13 — PRO UI + LIVE TIMELINE
+
+MỤC TIÊU
+Bản này tập trung sửa 7 feedback UI/Timeline của v1.0.12 và triển khai hướng giao diện PRO đã duyệt.
+
+1) SỬA LỖI ẨN BASIC EDITOR LÀM PREVIEW TRÀN
+- Exporter được đổi sang QSplitter dọc thật sự:
+  TOP    = Cài đặt xuất + Preview + Lồng tiếng/Sub
+  BOTTOM = Basic Video Editor
+- Khi ẩn Editor, widget Editor được hide trong splitter và toàn bộ chiều cao trả về Preview.
+- Không còn layout cũ giữ khoảng trống/geometry sai.
+- Khi mở lại, chiều cao Editor trước đó được khôi phục.
+
+2) TRIM/CUT ÁP DỤNG NGAY LÊN PREVIEW TIMELINE
+- Timeline Editor trở thành nguồn thời gian chính khi "Dùng timeline khi Xuất Video" bật.
+- Ví dụ source 01:06 trim còn 51.523s:
+  Preview slider phía trên đổi ngay về 00:51.
+- Không cần render lại video chỉ để xem trim.
+- Player vẫn decode file gốc nhưng app ánh xạ source time <-> edited global time theo thời gian thực.
+- Khi tới OUT của clip, playback tự chuyển clip kế tiếp.
+- Clip cuối dừng đúng OUT.
+- Final Export vẫn render timeline thật bằng FFmpeg.
+
+3) ĐỒNG BỘ PLAYHEAD ĐỎ <-> SLIDER XANH
+- Một global timeline clock duy nhất.
+- Video chạy -> playhead đỏ chạy theo.
+- Kéo slider xanh -> playhead đỏ đi cùng.
+- Click/kéo ruler đỏ -> slider xanh + video seek theo.
+- Click vào clip không kéo -> seek tới đúng thời điểm đó.
+- Sửa geometry timeline: bỏ minimum-width/gap làm playhead lệch sau nhiều clip.
+
+4) AI STUDIO — 40 PHONG CÁCH + NGHĨA TIẾNG VIỆT
+Dropdown vẫn giữ 100% tên tiếng Anh để vừa dùng vừa học.
+Ngay dưới dropdown có dòng "🇻🇳 Nghĩa" giải thích tiếng Việt.
+
+Một số style mới:
+- How it works
+- Engineering breakdown
+- Mega machines
+- Manufacturing process
+- Satisfying process
+- Invention showcase
+- Innovation story
+- Product teardown
+- Science and discovery
+- History documentary
+- News report
+- Business case study
+- Storytelling documentary
+- Mystery and curiosity
+- Top 10 countdown
+- Educational lesson
+- Beginner friendly
+- Expert deep dive
+- Cinematic narration
+- High-energy shorts
+- Agriculture and machinery
+- Construction and heavy equipment
+- Automotive engineering
+- Aerospace engineering
+- Technology innovation
+- Environmental documentary
+- Food production
+- Travel documentary
+- Human interest story
+- Problem solution explainer
+- Myth vs fact
+- Data driven explainer
+... tổng cộng 40 style.
+
+Style và Market cũng được lưu trong Settings khi bấm Lưu Settings.
+
+5) PREVIEW ZOOM IN / OUT
+Header Preview có:
+  [−] [100%] [+] [Fit]
+- Range 50% -> 300%.
+- Zoom chỉ ảnh hưởng editor canvas, KHÔNG làm thay đổi video xuất.
+- Text/Sub/Logo/Blur/Image vẫn dùng đúng tọa độ % của video.
+- Khi zoom > 100%: giữ chuột GIỮA và kéo để pan canvas.
+- Fit đưa về 100% và reset pan.
+
+6) PANEL RESIZE CHUYÊN NGHIỆP
+- Cài đặt xuất | Preview | Lồng tiếng/Sub dùng QSplitter ngang.
+- Preview | Basic Video Editor dùng QSplitter dọc.
+- Kéo thanh phân cách để thay đổi chiều rộng/chiều cao.
+- Splitter handle được làm rõ và highlight khi hover.
+- Size panel được lưu trong Project/Autosave.
+- Có nút:
+  ☰ Cài đặt
+  Lồng tiếng ☰
+  để ẩn/hiện side panel, mở rộng Preview khi cần.
+
+7) UI/UX COMPACT
+- Log Export ẩn mặc định -> nút ▸ Log khi cần xem.
+- Queue video giảm chiều cao.
+- Layers trên Preview gọn hơn.
+- Thuộc tính Text/Image (Content, Start, End, X/Y, Size, Font, Color, Opacity)
+  ẩn mặc định -> ▸ Thuộc tính.
+- Layer list vẫn giữ Add/Sửa/Xóa.
+- Editor hint rút gọn thành 1 dòng workflow.
+- Scrollbar + splitter styling mới.
+
+PROJECT/AUTOSAVE LƯU THÊM
+- preview_zoom_percent
+- editor_visible
+- editor_restore_sizes
+- export_body_sizes
+- export_vertical_sizes
+- export_log_visible
+- editor_layer_props_visible
+- left_panel_visible
+- right_panel_visible
+- toàn bộ editor_clips/editor_layers của v1.0.12 vẫn giữ nguyên.
+
+TEST NỘI BỘ
+- Python AST/compile: PASS.
+- Trim regression: source 66s -> timeline 51.523s: PASS.
+- Multi-clip global/source time mapping: PASS.
+- Static checks cho red/blue sync, splitters, zoom/pan, compact properties, 40 AI styles: PASS.
+
+LƯU Ý TEST WINDOWS
+Môi trường build không có PySide6 nên UI Qt thật trên Windows vẫn cần test thực tế.
+Nếu có lỗi runtime, gửi popup + Crash/Log và version 1.0.13 để patch tiếp trên cùng codebase.

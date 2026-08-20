@@ -1,0 +1,50 @@
+MachineScope Studio v1.0.9 — PIPER VOICE MANAGER
+
+NEW TTS ENGINE
+- Piper Offline (Free)
+- Gemini TTS
+- Edge TTS
+- Windows SAPI
+
+DEFAULT
+Engine: Piper Offline (Free)
+Voice: en_US-lessac-medium
+
+PIPER VOICE MANAGER
+- Search voice
+- Filter language
+- Refresh full online catalog from official Piper voices.json
+- Shows downloaded/offline state
+- Shows approximate download size when metadata is available
+- Download only selected voice
+- Listen/test downloaded voice
+- Delete local voice
+- Open MODEL_CARD / license page
+- Double-click voice to select
+
+OFFLINE FLOW
+First use:
+  Select Piper voice
+  -> download .onnx + .onnx.json once
+  -> model stored in MachineScope/piper_voices/
+
+Next videos:
+  -> no API request
+  -> no TTS quota
+  -> local ONNX synthesis
+
+PERFORMANCE
+- PiperVoice is cached in memory.
+- Same voice is loaded once and reused across all video scenes.
+- Speed maps to Piper length_scale.
+- Output remains WAV and continues through the existing true-duration
+  voice_manifest -> narration_synced.m4a -> subtitle_synced_en.srt pipeline.
+
+LICENSE
+- Voice models can have different licenses.
+- Voice Manager does NOT guess commercial safety.
+- "License / Model Card" opens the official model card for the selected voice.
+
+INSTALL
+- requirements.txt now includes piper-tts
+- existing users can run install_piper.bat once

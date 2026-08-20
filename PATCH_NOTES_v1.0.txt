@@ -1,0 +1,56 @@
+MachineScope Studio v1.0 — VIDEO SINK LIVE PREVIEW
+
+NGUYÊN NHÂN TỪ LOG NGƯỜI DÙNG
+- Video gốc đọc OK.
+- processed_preview_0004.mp4 đọc OK.
+- H.264/AAC streams đều hợp lệ.
+- "Unknown cover type: 0x1" là warning metadata/container.
+- h264_mf/hevc_mf là capability warning của Qt/Windows Media Foundation.
+- Không có lỗi FFmpeg decode chính trong log được gửi.
+
+LỖI KIẾN TRÚC V0.9
+QVideoWidget trên Windows có thể dùng native video surface.
+Các QWidget Blur/Sub/Logo đặt phía trên QVideoWidget không đảm bảo cùng compositing
+surface, nên effect state thay đổi nhưng người dùng không thấy trên video.
+
+V1.0 THAY HẲN PREVIEW ENGINE
+QMediaPlayer
+  -> QVideoSink
+  -> QVideoFrame
+  -> InteractivePreviewOverlay (1 QWidget duy nhất)
+
+Widget này tự vẽ:
+1. video frame
+2. blur / black privacy mask
+3. logo
+4. chữ phủ
+5. subtitle
+6. selection handles
+
+=> video và effect nằm trên CÙNG surface.
+
+LIVE BLUR
+- Đen mờ: vẽ alpha black trực tiếp trên frame.
+- Trong mờ: crop đúng vùng nguồn -> downsample -> upscale để tạo blur real-time.
+- Không cần FFmpeg render/reload chỉ để nhìn blur.
+- AUTO SUB và Manual Blur đều thấy ngay khi bật.
+
+LIVE SUB / LOGO / TEXT
+- Subtitle thấy ngay.
+- Logo thấy ngay.
+- Chữ phủ thấy ngay.
+- Kéo/resize bằng chuột trên cùng canvas.
+
+KHÔNG RESET 00:00
+- Chỉnh effect không đổi media source.
+- Player tiếp tục ở position hiện tại.
+- Background cache sau 4.2 giây chỉ dùng để kiểm tra final FFmpeg.
+- Cache không tự thay Live Preview.
+
+FINAL EXPORT
+- Vẫn dùng FFmpeg pipeline của v0.9.
+- Blur zones / Auto Sub / Subtitle / Logo / Text / Audio vẫn render thật.
+
+LOG WARNING
+- Unknown cover type: không phải lỗi.
+- hevc_mf could not create MFT: Qt probing HEVC encoder capability, không ảnh hưởng H.264 source.

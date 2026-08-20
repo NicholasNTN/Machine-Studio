@@ -1,0 +1,16 @@
+MachineScope Studio v1.0.5 — COOKIE-SAFE DOWNLOADER
+
+Lỗi từ ảnh:
+- Failed to decrypt with DPAPI
+- Could not copy Chrome cookie database
+- Firefox cookie profile/database không tồn tại
+
+Cách sửa:
+- Windows Auto không tự đọc browser cookies.
+- Auto thử public/no-cookie + impersonation.
+- Nếu có cookies.txt: dùng cookies.txt làm authenticated fallback.
+- Edge/Chrome/Firefox/Brave chỉ chạy khi người dùng chọn rõ.
+- Thêm ô Cookie file + nút Chọn cookies.txt.
+- Preflight browser profile để không thử Firefox khi không cài/profile không tồn tại.
+- DPAPI/DB lock/missing DB chuyển thành thông báo ngắn gọn.
+- Cookie JSON bị từ chối sớm; yt-dlp cần Netscape cookies.txt.

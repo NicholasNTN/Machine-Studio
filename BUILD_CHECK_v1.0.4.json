@@ -1,0 +1,24 @@
+{
+  "douyin_share": {
+    "url": "https://v.douyin.com/1pVDp1V7ykc/",
+    "platform": "Douyin"
+  },
+  "bilibili_share": {
+    "url": "https://b23.tv/AbC1234",
+    "platform": "Bilibili"
+  },
+  "youku_share": {
+    "url": "https://v.youku.com/v_show/id_XNjA123.html?spm=a2h0c.8166622",
+    "platform": "Youku"
+  },
+  "bare_douyin": {
+    "url": "https://v.douyin.com/ABCdEf/",
+    "platform": "Douyin"
+  },
+  "youtube": {
+    "url": "https://www.youtube.com/watch?v=abc123",
+    "platform": "YouTube"
+  },
+  "syntax": "OK",
+  "yt_dlp_local_version_in_build_env": "chưa sẵn sàng"
+}

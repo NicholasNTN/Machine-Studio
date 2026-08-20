@@ -1,0 +1,18 @@
+MachineScope Studio v0.3.1 BETA
+
+FIX:
+- Sửa lỗi FFprobe/Permission denied trên Windows.
+- Kiểm tra file có tồn tại và có thật sự là file trước khi chạy FFprobe.
+- Test quyền đọc file trực tiếp bằng Python.
+- Chuẩn hóa đường dẫn Windows trước khi truyền vào FFmpeg/FFprobe.
+- Phân biệt:
+  + Windows chặn ffprobe.exe
+  + video nguồn bị khóa / không có quyền đọc
+  + đường dẫn trỏ nhầm vào thư mục
+- Popup lỗi giờ hiển thị nguyên nhân dễ đọc.
+- Thêm diagnose_ffmpeg.bat.
+
+Nếu vẫn Permission denied:
+1. Copy video sang D:\Video\test.mp4
+2. Mở app và chọn lại file đó.
+3. Nếu vẫn lỗi, chạy diagnose_ffmpeg.bat và chụp kết quả.

@@ -1,0 +1,61 @@
+MachineScope Studio v0.9 — STABLE AUTO-BLUR
+
+1. SỬA LỖI APP TỰ TẮT
+- Sửa vòng đời QThread: không còn xóa QThread ngay trong signal done/error.
+- Worker chỉ được giải phóng sau signal finished của Qt.
+- Áp dụng cho AI/TTS/Export, background preview và auto subtitle detector.
+- Đây là lỗi có thể làm Windows/PySide abort toàn bộ process với thông báo kiểu:
+  QThread: Destroyed while thread is still running.
+- Final Export có preflight try/catch: lỗi setting/FFmpeg hiện popup, không làm app biến mất.
+- Khi đóng app lúc worker đang chạy, app yêu cầu dừng/chờ worker sạch trước khi thoát.
+
+2. CRASH LOG
+- logs/crash.log: faulthandler + unhandled Python exception.
+- logs/console.log: stdout/stderr/Qt/FFmpeg của toàn session.
+- run.bat giữ cửa sổ lại nếu process thoát với exit code lỗi.
+- open_crash_logs.bat mở hai file log.
+
+3. AUTO CHE PHỤ ĐỀ GỐC
+- Toggle: Tự động che phụ đề gốc có sẵn trên video.
+- Dò local bằng OpenCV, không dùng API/AI và không upload video.
+- Lấy mẫu nhiều frame, tìm band text-like ở nửa dưới video.
+- Tạo một vùng riêng có nhãn AUTO SUB.
+- AUTO SUB tự căn X/Y/W/H đủ che text + outline/shadow.
+- Nếu detector không chắc chắn, dùng vùng fallback an toàn.
+- AUTO SUB vẫn kéo/resize được bằng chuột hoặc nhập X/Y/W/H.
+
+4. MANUAL BLUR RIÊNG
+- Nút + Vùng thủ công tạo ngay một vùng mới, không bắt mở dialog.
+- Mục đích: che logo có sẵn, watermark, biển số, khuôn mặt hoặc vùng khác.
+- Kéo để di chuyển, kéo handle góc phải để resize.
+- Có thể thêm nhiều vùng manual cùng AUTO SUB.
+- Xóa AUTO SUB sẽ tắt chế độ tự che; xóa manual không ảnh hưởng AUTO SUB.
+
+5. LOGO / CHỮ PHỦ CHỈNH BẰNG CHUỘT
+- Logo: kéo để đổi vị trí, kéo handle để đổi kích thước.
+- Chữ phủ: kéo để đổi vị trí, kéo handle để đổi cỡ chữ.
+- Các giá trị X/Y/size được lưu Project và đi vào FFmpeg Final Export.
+- Có panel thu gọn Thông số Logo / Thông số Chữ phủ.
+
+6. LIVE PREVIEW MƯỢT
+- Blur/Sub/Logo/Chữ phủ là Qt overlay trực tiếp, không reload QMediaPlayer.
+- Vị trí phát hiện tại giữ nguyên, không quay về 00:00 khi chỉnh.
+- Final-look cache vẫn render ngầm sau debounce.
+- Background cache KHÔNG tự đổi file đang xem.
+- Background FFmpeg chạy BELOW_NORMAL_PRIORITY trên Windows.
+- Nếu NVENC có trong FFmpeg nhưng driver/CUDA thực tế không chạy được, app tự fallback CPU thay vì lỗi.
+- Cache không chạy cạnh tranh lúc AI/TTS/Final Export đang chạy.
+
+7. GIAO DIỆN GỌN
+- Blur: panel ▸ Thông số vùng.
+- Subtitle: panel ▸ Thông số phụ đề.
+- Logo: panel ▸ Thông số Logo.
+- Chữ phủ: panel ▸ Thông số Chữ phủ.
+- Cột trái/phải vẫn scroll.
+
+WORKFLOW BLUR MỚI
+A. Che phụ đề gốc:
+   bật Tự động che phụ đề gốc -> app dò -> AUTO SUB -> kéo nhẹ nếu cần.
+B. Che logo/watermark khác:
+   + Vùng thủ công -> kéo vùng lên logo -> resize.
+C. Có thể dùng A + nhiều B đồng thời.

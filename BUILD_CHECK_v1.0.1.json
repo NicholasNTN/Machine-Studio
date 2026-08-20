@@ -1,0 +1,24 @@
+{
+  "syntax": "OK",
+  "single_line_split_count": 3,
+  "sample_cues": [
+    {
+      "start": 1.0,
+      "end": 2.316,
+      "text": "world's largest land"
+    },
+    {
+      "start": 2.316,
+      "end": 3.653,
+      "text": "machines, designed for"
+    },
+    {
+      "start": 3.653,
+      "end": 5.0,
+      "text": "heavy-duty earth moving"
+    }
+  ],
+  "timeline_start": 1.0,
+  "timeline_end": 5.0,
+  "no_newlines": true
+}

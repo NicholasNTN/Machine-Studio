@@ -1,0 +1,59 @@
+{
+  "ass_effect_dialogue_counts": {
+    "Không": 1,
+    "Pop": 1,
+    "Bounce": 1,
+    "Slide Up": 1,
+    "Fade": 1,
+    "Karaoke": 1,
+    "Typewriter": 23
+  },
+  "speech_pause_test": {
+    "ffmpeg_available": true,
+    "intervals": [
+      [
+        0.0,
+        0.55
+      ],
+      [
+        0.9001,
+        1.5
+      ]
+    ],
+    "srt_cues": [
+      [
+        0.0,
+        0.55,
+        "This machine pauses"
+      ],
+      [
+        0.9,
+        1.5,
+        "then continues working"
+      ]
+    ]
+  },
+  "preview_still_test": {
+    "path_exists": true,
+    "size": 23109
+  },
+  "syntax_files": 16,
+  "feature_pause_hide": true,
+  "speech_detect": true,
+  "old_manifest_retro_detect": true,
+  "ready_preview_still": true,
+  "still_extractor": true,
+  "live_effect_state": true,
+  "effects": [
+    "Không",
+    "Pop",
+    "Bounce",
+    "Slide Up",
+    "Fade",
+    "Karaoke",
+    "Typewriter"
+  ],
+  "ass_animation_export": true,
+  "runtime_gui_import_environment": "PySide6 not installed in build environment; Windows runtime test required",
+  "syntax_final": "OK"
+}

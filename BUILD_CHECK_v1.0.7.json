@@ -1,0 +1,11 @@
+{
+  "syntax": "OK",
+  "success_endpoint": "/v1/chat/completions",
+  "success_http_log": true,
+  "request_id_log": true,
+  "token_usage_log": true,
+  "retry_429_then_success": "RECOVERED",
+  "retry_attempts": 2,
+  "raw_429_log": true,
+  "worker_prefers_AIProviderError": true
+}

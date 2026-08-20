@@ -1,0 +1,83 @@
+MachineScope Studio v0.6 WORKFLOW REDESIGN BETA
+
+THAY ĐỔI THEO FEEDBACK
+
+1. PROJECT / AUTO-SAVE
+- AI Studio tự lưu project.json sau khi AI hoàn tất.
+- Mỗi lần sửa Timeline/Kịch bản sẽ auto-save sau khoảng 0.7 giây.
+- Khi đóng app cũng save.
+- App nhớ project gần nhất và tự khôi phục khi mở lại.
+- Project lưu: video, AI summary, script, subtitle path, voice path và thiết lập export.
+
+2. AI STUDIO
+- BỎ hoàn toàn phần Tạo Voice/TTS khỏi AI Studio.
+- Controls nằm bên TRÁI.
+- Timeline/Kịch bản nằm bên PHẢI.
+- Chỉ còn 1 nút AI HIỂU VIDEO + VIẾT KỊCH BẢN.
+- Khi AI xong: tự save -> tự chuyển dữ liệu sang Video Exporter/Lồng Tiếng.
+
+3. VIDEO EXPORTER LÀM LẠI
+Bố cục 3 cột gần giống VideoToolsPro:
+- Trái: Cài đặt xuất.
+- Giữa: Preview.
+- Phải: Lồng Tiếng (TTS) ở trên -> Setting Sub & Dịch ở dưới.
+
+4. CÀI ĐẶT XUẤT CHỈ GIỮ NHÓM YÊU CẦU
+- Khung hình: HD / Full HD / Full HD 60FPS / 2K / 4K / 3:4 / YouTube / Original.
+- Codec: Auto / H.264 / H.265 / AV1.
+- Encode: Auto GPU / GPU / CPU.
+- Bảo vệ quyền riêng tư & tối ưu file: loại metadata riêng tư + faststart.
+- Blur zones:
+  + Đen mờ.
+  + Trong mờ.
+  + Độ đậm.
+  + nhiều vùng.
+  + thêm/sửa/xóa.
+  + tự động che vùng phụ đề gốc ở đáy video.
+- Tốc độ phát.
+- Logo/watermark: ảnh, vị trí, kích thước, độ trong, xóa nền trắng.
+- Cài đặt nâng cao chỉ còn:
+  + Nền 2 bên: mờ video / đen.
+  + Chữ phủ.
+
+5. PREVIEW
+- Tỉ lệ 9:16 / 3:4 / 16:9.
+- Timeline seek.
+- Play/Pause.
+- Hide/Show Sub.
+- Subtitle lấy từ AI hiển thị trực tiếp trên preview.
+- Thanh âm thanh dưới preview:
+  + Tắt nhạc nền.
+  + Tắt giọng gốc.
+  + Âm gốc.
+  + Giọng đọc.
+  + Nhạc nền.
+
+6. LỒNG TIẾNG ĐƯA LÊN TRÊN CÙNG BÊN PHẢI
+Workflow:
+AI Studio -> kịch bản tự sang Exporter
+-> Tạo Giọng Đọc
+-> Lấy Sub từ AI
+-> chỉnh/dịch subtitle
+-> Export.
+
+- Gemini TTS / Edge TTS / Windows SAPI.
+- Voice.
+- Speed.
+- Khớp timeline.
+- File voice ngoài.
+- Nhạc nền.
+- Tách giọng gốc bằng Demucs (tùy chọn).
+
+7. SETTING SUB & DỊCH
+- Bật phụ đề.
+- Gemini dịch SRT.
+- Target English US / Tiếng Việt / 中文.
+- Prompt dịch.
+- Preset subtitle.
+- Font / cỡ / màu / viền / đậm / nghiêng / nền / opacity / shadow / vị trí / ký tự dòng.
+- LẤY SUB TỪ AI: lấy trực tiếp US Voice hoặc Vietnamese từ project AI.
+- SRT được đưa ngay lên Preview.
+- Editor SRT.
+- Lọc rác.
+- Tìm/Thay.

@@ -1,0 +1,36 @@
+MachineScope Studio v1.0.7 — CKEY DIAGNOSTICS
+
+Sửa đúng lỗi chẩn đoán CKEY:
+- worker_error ưu tiên AIProviderError trước GeminiError.
+- Provider = CKEY không còn bị popup lấy nhầm thông báo Gemini từ traceback.
+
+Mỗi request OpenAI-compatible giờ log:
+[AI REQUEST]
+- Provider
+- POST endpoint
+- Model
+- Client Request ID
+- Payload bytes
+- Số frame ảnh
+
+[AI RESPONSE]
+- HTTP status
+- Latency
+- Request ID nếu gateway trả
+- Input/output/total tokens nếu có usage
+- Response bytes
+
+[AI ERROR]
+- HTTP status
+- Latency
+- Request ID
+- Raw error body tối đa 4000 ký tự
+
+429:
+- AI Studio/Dịch Sub tự retry tối đa 2 lần.
+- Test Provider retry 1 lần.
+- dùng Retry-After nếu server gửi.
+- nếu vẫn lỗi, popup ghi rõ CKEY HTTP 429 + raw response.
+- không đổi provider thành Gemini trong thông báo.
+
+Không log API key và không log base64 của frame.

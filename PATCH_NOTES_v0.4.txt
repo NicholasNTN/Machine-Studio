@@ -1,0 +1,27 @@
+MachineScope Studio v0.4 CREATOR BETA
+
+MỚI SO VỚI v0.3.1:
+- Tắt toàn bộ âm gốc.
+- Tách giọng gốc bằng Demucs và giữ no_vocals làm nhạc/âm nền.
+- Chọn file voice ngoài.
+- Chọn nhạc nền + loop + volume.
+- Auto duck âm nguồn dưới narration.
+- Narration volume + speed.
+- TTS: Gemini / Edge / Windows SAPI.
+- TTS timeline-fit 0-100%.
+- 16 subtitle templates.
+- Chọn font hệ thống, size, màu, outline, shadow, background, opacity, bold, italic, uppercase.
+- Điều chỉnh vị trí subtitle theo % chiều cao video.
+- Find/Replace subtitle.
+- AI Translate SRT.
+- Subtitle editor.
+- AI OCR SRT từ chữ Trung đã đọc.
+- Blur background fit.
+- Auto zoom in/out.
+- Brightness / contrast / saturation / sharpen / vignette.
+- Text overlay.
+- Save/load Export preset.
+- CapCut package thêm music / accompaniment / subtitle style.
+
+GIỮ FIX v0.3.1:
+- Kiểm tra permission video và FFprobe rõ ràng hơn.

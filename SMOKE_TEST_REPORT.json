@@ -1,0 +1,39 @@
+{
+  "manifest": [
+    {
+      "scene_index": 0,
+      "start": 0.0,
+      "end": 1.1,
+      "duration": 1.1,
+      "source_duration": 1.1,
+      "speed_factor": 1.0,
+      "path": "/mnt/data/MachineScope_Studio_v0.7_SYNC_PREVIEW_FIX/_smoke/voice_0.wav",
+      "en_text": "First line.",
+      "vi_text": "Dòng một."
+    },
+    {
+      "scene_index": 1,
+      "start": 2.0,
+      "end": 4.0,
+      "duration": 2.0,
+      "source_duration": 2.4,
+      "speed_factor": 1.2,
+      "path": "/mnt/data/MachineScope_Studio_v0.7_SYNC_PREVIEW_FIX/_smoke/voice_1.wav",
+      "en_text": "Second longer line.",
+      "vi_text": "Dòng hai."
+    },
+    {
+      "scene_index": 2,
+      "start": 4.0,
+      "end": 4.8,
+      "duration": 0.8,
+      "source_duration": 0.8,
+      "speed_factor": 1.0,
+      "path": "/mnt/data/MachineScope_Studio_v0.7_SYNC_PREVIEW_FIX/_smoke/voice_2.wav",
+      "en_text": "Third line.",
+      "vi_text": "Dòng ba."
+    }
+  ],
+  "srt_exists": true,
+  "processed_video_bytes": 107275
+}

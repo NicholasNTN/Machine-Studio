@@ -1,0 +1,54 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Runtime/cache
+preview_cache/
+cache/
+temp/
+tmp/
+logs/
+*.log
+
+# Generated user data
+projects/
+downloads/
+exports/
+
+# Media
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.m4v
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+
+# Secrets/local settings
+.env
+.env.*
+secrets.json
+credentials.json
+settings.local.json
+user_settings.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build
+build/
+dist/
+*.spec

@@ -1,0 +1,45 @@
+MachineScope Studio v1.0.8 — TTS FALLBACK
+
+NGUYÊN NHÂN LỖI
+- AI hiểu video + viết kịch bản: CKEY -> HTTP 200, hoạt động tốt.
+- Tạo giọng đọc: là pipeline riêng, vẫn dùng Gemini TTS + Google TTS API key.
+- Google TTS key trả 429 => popup "Gemini báo 429".
+
+SỬA
+1. Tách rõ AI Provider và TTS:
+   CKEY = hiểu video / viết script / dịch.
+   Gemini TTS / Edge TTS / Windows SAPI = tạo voice.
+
+2. Thêm:
+   [x] Gemini lỗi → tự chuyển Edge TTS
+
+3. Edge fallback mặc định:
+   en-US-JennyNeural
+
+4. Khi Gemini TTS trả:
+   - 429
+   - quota
+   - rate limit
+   - resource_exhausted
+   app tự:
+   - chuyển scene đang lỗi sang Edge TTS;
+   - giữ Edge TTS cho toàn bộ scene còn lại;
+   - tiếp tục build narration_synced.m4a;
+   - tiếp tục tạo voice_manifest.json;
+   - tiếp tục tạo subtitle_synced_en.srt;
+   - không làm mất timeline đã tạo.
+
+5. Nếu Google TTS key trống:
+   - fallback ON => dùng Edge ngay.
+   - fallback OFF => báo rõ cần Google TTS key.
+
+6. Log TTS:
+   selected engine
+   selected voice
+   scene hiện tại
+   fallback reason
+   final fallback voice
+
+7. Mỗi item manifest lưu thêm:
+   tts_engine
+   tts_voice

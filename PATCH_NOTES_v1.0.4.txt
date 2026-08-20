@@ -1,0 +1,48 @@
+MachineScope Studio v1.0.4 — UNIVERSAL DOWNLOADER
+
+FIX CHÍNH TỪ ẢNH LỖI
+Input cũ:
+"0.07 ... #hashtag ... https://v.douyin.com/xxxx/ 复制此链接..."
+
+v1.0.3 gửi nguyên chuỗi trên cho yt-dlp => "is not a valid URL".
+
+v1.0.4:
+- tìm URL http/https nằm bên trong nguyên đoạn share text;
+- loại dấu câu Trung/Việt ở cuối;
+- nhận diện platform;
+- chỉ gửi URL sạch cho yt-dlp.
+
+PLATFORM
+- Douyin / v.douyin.com
+- Bilibili / b23.tv / bilibili.tv
+- Youku
+- Xiaohongshu / xhslink
+- TikTok
+- YouTube
+- Facebook
+- Instagram
+- X/Twitter
+- Vimeo
+- generic yt-dlp fallback cho site khác.
+
+COOKIE FALLBACK
+Auto:
+1. không cookies
+2. Edge
+3. Chrome
+4. Firefox
+
+Với site anti-bot:
+- nếu curl-cffi có sẵn, app thử browser impersonation;
+- sau đó fallback không impersonation.
+
+QUALITY
+Best MP4 / 1080p / 720p:
+- ưu tiên MP4 + M4A;
+- fallback format site đang cung cấp;
+- merge output MP4 bằng FFmpeg.
+
+UPDATE ENGINE
+- thêm nút "Cập nhật yt-dlp";
+- thêm update_downloader.bat;
+- install.bat cài yt-dlp nightly + curl-cffi.

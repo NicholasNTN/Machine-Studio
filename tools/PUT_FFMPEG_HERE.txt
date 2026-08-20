@@ -1,0 +1,3 @@
+Nếu FFmpeg chưa nằm trong PATH của Windows:
+- copy ffmpeg.exe vào thư mục tools
+- copy ffprobe.exe vào thư mục tools

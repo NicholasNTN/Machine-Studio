@@ -1,0 +1,19 @@
+{
+  "auto_zone": {
+    "x": 10.0,
+    "y": 69.0,
+    "w": 80.0,
+    "h": 15.0,
+    "auto": true
+  },
+  "output_bytes": 476143,
+  "probe": {
+    "duration": 5.0,
+    "has_audio": true,
+    "width": 360,
+    "height": 640,
+    "codec": "h264",
+    "normalized_path": "/mnt/data/MachineScope_Studio_v0.9_STABLE_AUTO_BLUR/_smoke_v09_full/final.mp4"
+  },
+  "nvenc_runtime": false
+}

@@ -1,0 +1,89 @@
+MachineScope Studio v0.7 — SYNC + PROCESSED PREVIEW FIX
+
+FIX LÕI (không chỉ UI)
+
+1. GIỌNG ĐỌC THỰC SỰ VÀO VIDEO
+- TTS không còn gom nhiều scene thành chunk 30 giây.
+- Tạo 1 voice file cho TỪNG scene AI.
+- Voice được đặt chính xác vào start time của scene.
+- Nếu câu đọc dài hơn scene, FFmpeg tự tăng tốc vừa đủ để không đè sang scene sau.
+- Sau khi tạo voice, app tự bật "Tắt giọng gốc".
+- Narration timeline có độ dài đúng bằng video.
+- Final Export và Processed Preview dùng chính narration này.
+
+2. SUBTITLE KHỚP VOICE THẬT
+Khuyến nghị mới:
+- KHÔNG tạo subtitle hoàn toàn mới bằng AI sau TTS.
+- Text subtitle lấy từ CHÍNH script mà TTS vừa đọc.
+- Timestamp subtitle lấy từ THỜI LƯỢNG AUDIO THẬT sau khi tạo voice/time-fit.
+=> text và giọng là cùng một nguồn, timeline không còn dựa vào ước lượng AI ban đầu.
+
+- "LẤY SUB KHỚP GIỌNG" chỉ hoạt động sau khi Tạo Giọng Đọc.
+- English sub = exact English TTS script.
+- Vietnamese sub = bản Việt AI nhưng dùng CHÍNH timestamp voice English.
+- Dịch subtitle bằng Gemini chỉ thay text, GIỮ NGUYÊN timestamp 100%.
+
+3. PROCESSED PREVIEW
+Preview cũ chỉ phát source video, nên người dùng vẫn nghe giọng gốc và không thấy blur.
+v0.7 thêm:
+- "↻ Cập nhật Preview".
+- Preview được FFmpeg render low-res qua CÙNG pipeline với Export:
+  + voice narration
+  + mute giọng gốc
+  + source volume
+  + background music
+  + subtitle burn
+  + blur zones
+  + logo
+  + nền 2 bên
+  + chữ phủ
+  + speed
+- Sau Tạo Voice và Lấy Sub, app tự render Processed Preview.
+- Blur/logo/audio/sub thay đổi sẽ schedule cập nhật preview.
+
+4. BLUR ZONES
+- Thêm/sửa vùng tự bật Blur.
+- Preview render thật để nhìn thấy blur.
+- Final Export dùng cùng blur config.
+
+5. AI STUDIO
+Giữ:
+- Chọn Video.
+- ← Video từ Exporter.
+- AI hiểu + viết script.
+- Auto-save project.
+
+6. DỊCH THUẬT
+- Bỏ ô Prompt tự do khỏi giao diện chính.
+- Thay bằng Phong cách:
+  + Tự nhiên - video US
+  + Ngắn gọn - subtitle
+  + Giữ thuật ngữ kỹ thuật
+  + Sát nghĩa
+- Dịch KHÔNG được sửa timestamps.
+
+7. CAPCUT BRIDGE
+Khôi phục:
+- Xuất package.
+- Mở CapCut.
+Package có thể gồm:
+- final export (nếu có)
+- processed preview
+- source video
+- synced SRT
+- narration
+- nhạc
+- accompaniment
+- subtitle_style.json
+- project.json
+
+WORKFLOW CHUẨN v0.7
+
+AI Studio
+→ AI hiểu + viết kịch bản
+→ Video Exporter / Tạo Giọng Đọc
+→ app tự tắt giọng gốc + render Processed Preview
+→ LẤY SUB KHỚP GIỌNG
+→ chỉnh/dịch/style sub
+→ Processed Preview
+→ Xuất Video

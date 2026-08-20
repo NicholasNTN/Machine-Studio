@@ -1,0 +1,50 @@
+MachineScope Studio v1.0.10 — SUB ANIMATION + READY PREVIEW
+
+1) SUBTITLE ẨN KHI VOICE NGHỈ
+- Subtitle không còn fallback sang toàn bộ AI scene khi đã có SRT/voice timeline.
+- Cue end dùng end-exclusive để chữ không bị lưu thêm ở ranh giới/gap.
+- TTS chunk được phân tích bằng FFmpeg silencedetect.
+- Khoảng im lặng thật >= 220ms mặc định tạo khoảng trống subtitle.
+- Text được chia theo các speech interval; trong đoạn silence không có cue.
+- Có tùy chọn:
+    [x] Ẩn sub khi giọng nghỉ
+    Khoảng nghỉ >= 220 ms
+- Manifest cũ v1.0.9 cũng được retro-detect từ file voice khi bấm LẤY SUB KHỚP GIỌNG.
+
+2) VIDEO HIỆN NGAY KHI CHỌN
+- Khi chọn/add video, app trích một still frame ở ~0.05s.
+- Still được cache tại preview_cache/stills.
+- Live Preview hiện ảnh ngay; không cần nhấn Play.
+- Play chỉ bắt đầu chuyển động/audio.
+- Khi QVideoSink có frame thật, frame động thay thế still tự nhiên.
+
+3) HIỆU ỨNG SUB KIỂU SHORT-FORM/CAPCUT-LIKE
+Hiệu ứng:
+- Không
+- Pop
+- Bounce
+- Slide Up
+- Fade
+- Karaoke
+- Typewriter
+
+Thông số:
+- Thời gian animation: 60–1200 ms
+- Cường độ: 10–200%
+- Màu Karaoke
+
+Live Preview:
+- Pop/Bounce/Slide/Fade/Typewriter/Karaoke được vẽ trực tiếp bằng Qt overlay.
+- Không reload video khi đổi hiệu ứng.
+
+Final Export:
+- Hiệu ứng được ghi vào ASS và burn bằng FFmpeg/libass.
+- Pop/Bounce/Slide/Fade dùng ASS transform/move/fade.
+- Karaoke dùng ASS karaoke timing.
+- Typewriter tạo progressive ASS events.
+- Vị trí/font/outline/background hiện tại vẫn được giữ.
+
+LƯU Ý
+- Đây là hiệu ứng tương tự workflow subtitle short-form, không phải sao chép preset độc quyền của CapCut.
+- Để subtitle silence-aware từ voice cũ: bấm lại LẤY SUB KHỚP GIỌNG.
+- Để voice mới có speech_intervals ngay từ đầu: tạo voice lại bằng v1.0.10.

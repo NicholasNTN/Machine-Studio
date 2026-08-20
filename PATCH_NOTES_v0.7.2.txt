@@ -1,0 +1,49 @@
+MachineScope Studio v0.7.2 — BACKGROUND PREVIEW
+
+MỤC TIÊU
+Không còn: thay một setting -> player reload -> video giật/đen/nhảy 00:00.
+
+CƠ CHẾ MỚI
+
+1. Debounce 1.4 giây
+- Kéo slider / bật tắt nhiều setting liên tục:
+  không render từng lần.
+- App chờ bạn ngừng thao tác ~1.4s rồi render đúng trạng thái mới nhất.
+
+2. Render NGẦM
+- Current video/preview vẫn Play bình thường.
+- FFmpeg tạo proxy mới bằng background worker riêng.
+- Không dùng progress bar chính.
+- Không ép QMediaPlayer reload khi render xong.
+
+3. Khi render ngầm xong
+Nếu video đang PLAY:
+  - video tiếp tục chạy KHÔNG reload.
+  - trạng thái: "✓ Preview mới sẵn sàng".
+  - nút: "✓ Áp dụng Preview mới".
+
+Nếu video đang PAUSE/STOP:
+  - app tự áp dụng preview mới vì không làm gián đoạn playback.
+
+4. Khi Pause
+- Nếu đang có Preview mới chờ:
+  app tự chuyển sang bản mới.
+- Giữ gần đúng vị trí timeline đang xem.
+
+5. Khi bấm Play
+- Nếu có Preview mới chờ:
+  app dùng bản mới rồi Play.
+
+6. Nút Preview
+- Không có preview mới: "↻ Render Preview ngầm".
+- Đang render: "⏳ Rendering ngầm...".
+- Render xong trong lúc đang xem: "✓ Áp dụng Preview mới".
+
+7. Nếu thay setting trong lúc background render đang chạy
+- Không spawn thêm nhiều FFmpeg.
+- Đánh dấu dirty.
+- Render xong bản hiện tại -> debounce -> render một lần nữa với state mới nhất.
+
+KẾT QUẢ
+Bạn có thể chỉnh Blur / Subtitle / Logo / Audio khi video vẫn đang chạy.
+Màn hình không reload sau từng thao tác nữa.

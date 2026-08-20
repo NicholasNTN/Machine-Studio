@@ -1,0 +1,10 @@
+{
+  "syntax": "OK",
+  "manual_blur_button_bool_fixed": true,
+  "manual_blur_bool_guard": true,
+  "wheel_global_lock": true,
+  "wheel_click_to_arm": true,
+  "x_y_snap": true,
+  "pixel_subtitle_metrics": true,
+  "preview_no_clip_safety": true
+}

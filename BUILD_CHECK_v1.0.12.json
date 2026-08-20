@@ -1,0 +1,23 @@
+{
+  "syntax": "OK",
+  "timeline_clips": 4,
+  "timeline_expected_duration": 4.2,
+  "timeline_render_duration": 4.2,
+  "split_delete_test": true,
+  "reorder_test": true,
+  "multiple_text_layers": 2,
+  "multiple_image_layers": 1,
+  "final_export_exists": true,
+  "final_duration": 4.202,
+  "version": "1.0.12 BASIC VIDEO EDITOR BETA",
+  "editor_toggle": true,
+  "timeline_widget": true,
+  "split_button": true,
+  "trim_in_out": true,
+  "delete_segment": true,
+  "timeline_final_export": true,
+  "multiple_text_image_layers": true,
+  "layer_mouse_drag": true,
+  "project_persistence": true,
+  "syntax_final": "OK"
+}

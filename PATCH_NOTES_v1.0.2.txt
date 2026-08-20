@@ -1,0 +1,14 @@
+MachineScope Studio v1.0.2 — STABLE LAYOUT + EXPORT
+
+- Fix Add Blur: thao tác + chỉ thêm vùng trước; cache/autosave chạy sau event click.
+- Manual Blur độc lập với AUTO SUB.
+- AUTO SUB được căn giữa, vùng mặc định gọn hơn.
+- Subtitle mặc định "Căn giữa + bám Auto Blur".
+- Sub X/Y/Width/Font được tính một lần từ Auto Blur; không đổi font theo từng câu.
+- Câu dài được tách thành nhiều cue 1 dòng bằng fixed font.
+- Lề trong configurable.
+- SpinBox/DoubleSpinBox/ComboBox không nhận wheel nếu chưa click/focus.
+- Export dùng runtime-check NVENC; fallback CPU khi GPU runtime không hoạt động.
+- Export dùng file tạm + tên mới để tránh Windows lock/ghi đè.
+- MP3 cover-art / data / subtitle side streams không được map vào output.
+- Popup export ưu tiên hiển thị dòng lỗi thật thay vì chỉ Metadata.

@@ -1,0 +1,9 @@
+{
+  "syntax": "OK",
+  "windows_auto_has_browser_stop": true,
+  "cookie_file_mode": [
+    "cookies.txt"
+  ],
+  "dpapi_friendly_error": "Chrome cookie không giải mã được bằng DPAPI trên Windows. Hãy dùng cookies.txt trong app thay vì Auto đọc cookie từ Chrome/Edge.",
+  "browser_profile_preflight": true
+}

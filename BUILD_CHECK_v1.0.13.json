@@ -1,0 +1,23 @@
+{
+  "syntax": "OK",
+  "single_trim_master_duration": 51.523,
+  "multi_clip_mapping": "OK",
+  "preview_loaded_path_tracking": true,
+  "blue_red_global_clock": true,
+  "timeline_ruler_drag": true,
+  "timeline_exact_geometry": true,
+  "vertical_resizable_splitter": true,
+  "horizontal_resizable_columns": true,
+  "editor_hide_splitter_fix": true,
+  "preview_zoom": true,
+  "preview_pan_middle_mouse": true,
+  "compact_log": true,
+  "compact_layer_properties": true,
+  "side_panel_toggles": true,
+  "ai_style_count": 40,
+  "ai_style_vi_help": true,
+  "project_ui_persistence": true,
+  "final_ast": "PASS",
+  "version_string": "1.0.13 PRO UI + LIVE TIMELINE BETA",
+  "patch_notes": true
+}

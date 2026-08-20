@@ -1,0 +1,31 @@
+MachineScope Studio v0.7.1 — PREVIEW PLAYER FIX
+
+LỖI ĐÃ SỬA
+- v0.7 luôn render Processed Preview đè vào cùng `processed_preview.mp4`.
+- Qt Multimedia/Windows Media Foundation có thể cache URL hoặc giữ handle file cũ.
+- Kết quả: trạng thái hiện Playing nhưng màn hình đen và timeline đứng 00:00.
+
+CÁCH SỬA
+1. Mỗi lần render tạo file mới:
+   preview_cache/processed_preview_0001.mp4
+   preview_cache/processed_preview_0002.mp4
+   ...
+2. Trước khi load preview:
+   - player.stop()
+   - setSource(empty)
+   - chờ event-loop
+   - load URL file mới.
+3. Chỉ Auto Play sau khi Qt báo LoadedMedia/BufferedMedia.
+4. Nếu Qt báo InvalidMedia/Error:
+   - hiện trạng thái lỗi.
+   - ghi lỗi vào Log.
+5. FFprobe kiểm tra proxy vừa render trước khi đưa cho player.
+6. Cleanup các proxy preview cũ sau khi Windows nhả file handle.
+7. Nút Play tự reload media nếu player đang NoMedia/InvalidMedia.
+
+TEST
+- Bật Blur Zone → Cập nhật Preview.
+- App render proxy mới.
+- Preview phải tự chạy khi load xong.
+- Timeline phải tăng khỏi 00:00.
+- Blur/sub/voice phải xuất hiện trong Processed Preview.

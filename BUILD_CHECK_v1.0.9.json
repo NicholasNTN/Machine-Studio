@@ -1,0 +1,15 @@
+{
+  "syntax": "OK",
+  "piper_requirement": true,
+  "piper_default_engine": true,
+  "voice_manager_dialog": true,
+  "catalog_online_refresh": true,
+  "download_selected_voice_only": true,
+  "model_card_button": true,
+  "voice_cache": true,
+  "piper_tts_route": true,
+  "existing_gemini_kept": true,
+  "existing_edge_kept": true,
+  "true_timeline_kept": true,
+  "synced_subtitle_kept": true
+}

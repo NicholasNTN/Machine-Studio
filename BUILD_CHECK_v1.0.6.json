@@ -1,0 +1,18 @@
+{
+  "syntax": "OK",
+  "default_provider": "CKEY",
+  "ckey_base_url": "https://api.xah.io/v1",
+  "ckey_model": "levuphong2909/gemini-3.7-flash-high",
+  "test_endpoint": "/v1/chat/completions",
+  "authorization_header": "Bearer sk-test",
+  "test_model": "levuphong2909/gemini-3.7-flash-high",
+  "multimodal_endpoint": "/v1/chat/completions",
+  "multimodal_image_data_url": true,
+  "providers": [
+    "Google Gemini",
+    "CKEY",
+    "OpenAI",
+    "DeepSeek"
+  ],
+  "gemini_tts_key_is_separate": true
+}

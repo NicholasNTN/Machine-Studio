@@ -1,0 +1,87 @@
+MachineScope Studio v0.8 — LIVE EDITOR
+
+MỤC TIÊU
+- Chỉnh Blur/Sub bằng chuột ngay trên video.
+- Không reload file video sau mỗi thay đổi.
+- Không màn hình đen.
+- Không nhảy về 00:00.
+- Không làm giật playback vì render preview.
+- Thông số chi tiết có thể ẩn/hiện để giao diện gọn.
+
+1. LIVE OVERLAY EDITOR
+Blur Zone:
+- Click vùng blur để chọn.
+- Kéo vùng để di chuyển.
+- Kéo ô vuông góc phải để resize.
+- Final render vẫn dùng FFmpeg blur thật.
+- Live Preview dùng lớp edit trong suốt để thao tác ngay, không xử lý lại video frame.
+
+Subtitle:
+- Click subtitle để chọn.
+- Kéo subtitle để đổi vị trí X/Y.
+- Kéo ô vuông góc phải để đổi Độ rộng + Cỡ chữ.
+- Thay đổi hiển thị trực tiếp trong lúc video đang chạy.
+- Final ASS/SRT burn dùng X/Y/font/width đã chỉnh.
+
+2. THÔNG SỐ THU GỌN
+Blur:
+- "▸ Thông số vùng"
+- X / Y / W / H.
+- Panel mặc định ẩn.
+
+Subtitle:
+- "▸ Thông số phụ đề"
+- Preset / Font / Size / Color / Outline / X / Y / Width / Wrap...
+- Panel mặc định ẩn.
+- Có scroll ở cột trái/phải như trước.
+
+3. LIVE MULTI-TRACK AUDIO
+Không cần render video để nghe:
+- source audio từ video
+- narration/voice riêng
+- background music riêng
+- accompaniment/no-vocals riêng
+
+Các track chạy song song và app tự sync mỗi ~350ms.
+Khi tua video, các track audio cũng seek theo.
+Khi Pause/Play, tất cả track Pause/Play cùng nhau.
+
+=> chỉnh Voice volume / Music volume / Mute original không cần reload video.
+
+4. BACKGROUND RENDER CACHE
+- Sau khi ngừng chỉnh ~2.4 giây mới render cache.
+- Render bằng NVENC RTX nếu FFmpeg có h264_nvenc.
+- Nếu không có GPU encoder: x264 ultrafast chỉ 2 threads.
+- Background render KHÔNG BAO GIỜ tự thay file đang xem.
+- Xong chỉ hiện "✓ Render cache sẵn sàng".
+- Chỉ khi người dùng chủ động bấm "✓ Xem bản render" thì mới đổi.
+- Có nút "⚡ Live Preview" để quay lại source + live overlays/audio.
+
+5. PLAYBACK
+Trong lúc chỉnh:
+- media player hiện tại không đổi source.
+- position không reset.
+- video không đen.
+- timeline tiếp tục chạy.
+- render cache không chiếm pipeline player.
+
+6. FINAL EXPORT
+Final render vẫn áp dụng thật:
+- blur zones đúng X/Y/W/H
+- subtitle đúng X/Y/size/width
+- narration
+- mute original/accompaniment
+- music
+- logo
+- side background
+- overlay text
+
+
+7. HAI CHẾ ĐỘ PREVIEW
+- ⚡ Live Preview: dùng để chỉnh hàng ngày; KHÔNG đổi file, kéo Blur/Sub trực tiếp.
+- ✓ Xem bản render: chỉ dùng khi muốn kiểm tra pixel cuối cùng của FFmpeg.
+  App không bao giờ tự chuyển sang bản render.
+
+Lưu ý:
+- 'Trong mờ' trên Live Preview dùng glass-overlay nhẹ để thao tác mượt.
+- Blur thật bằng boxblur được áp dụng trong background cache và Final Export.

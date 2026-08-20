@@ -1,0 +1,19 @@
+{
+  "app.py": "syntax_ok",
+  "live_overlay.py": "syntax_ok",
+  "core/__init__.py": "syntax_ok",
+  "core/downloader.py": "syntax_ok",
+  "core/ffmpeg_engine.py": "syntax_ok",
+  "core/gemini_engine.py": "syntax_ok",
+  "core/models.py": "syntax_ok",
+  "core/preset_store.py": "syntax_ok",
+  "core/settings_store.py": "syntax_ok",
+  "core/subtitle_detector.py": "syntax_ok",
+  "core/subtitle_engine.py": "syntax_ok",
+  "core/system_info.py": "syntax_ok",
+  "core/tts_engine.py": "syntax_ok",
+  "core/vocal_separator.py": "syntax_ok",
+  "qthread_early_clear_in_done": true,
+  "auto_detector": true,
+  "crash_log_launcher": true
+}

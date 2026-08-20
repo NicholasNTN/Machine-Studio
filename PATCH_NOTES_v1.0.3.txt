@@ -1,0 +1,40 @@
+MachineScope Studio v1.0.3 — INTERACTION + SUB FIT
+
+1) FIX + VÙNG THỦ CÔNG
+Nguyên nhân chính xác:
+QPushButton.clicked(bool) truyền False vào add_blur_zone(zone).
+Code v1.0.2 gọi False.get(...) => AttributeError.
+
+v1.0.3 sửa cả hai lớp:
+- button dùng lambda, không truyền checked;
+- add_blur_zone tự bỏ qua bool nếu bị gọi nhầm.
+
+2) KHÓA CON LĂN THÔNG SỐ
+Thêm "🔒 Khóa lăn thông số" — mặc định BẬT.
+- Bật: wheel không bao giờ đổi SpinBox/DoubleSpinBox/ComboBox.
+- Tắt: phải CLICK đúng ô trước rồi wheel mới hoạt động.
+- Rời chuột khỏi ô / mất focus: tự disarm.
+=> Scroll panel không còn làm X/Y/font/opacity nhảy ngoài ý muốn.
+
+3) SNAP TRỤC X/Y
+Blur, Subtitle, Logo, Chữ phủ:
+- khi center tới gần X=50% => snap chính xác vào trục X;
+- khi center tới gần Y=50% => snap chính xác vào trục Y;
+- hiện guide xanh nét đứt khi đang snap;
+- thả chuột thì guide biến mất.
+
+4) SUBTITLE KHÔNG BỊ CẮT CHỮ
+Không giảm font theo từng câu.
+Thay vào đó:
+- dùng QFontMetricsF đo độ rộng pixel THẬT của font hiện tại;
+- tính đúng chiều rộng vùng subtitle;
+- câu quá dài tự chia thành nhiều cue ngắn hơn;
+- timeline con vẫn nằm trọn trong timeline voice;
+- Live Preview có safety-net pixel split ngay cả với SRT project cũ;
+- trước Final Export, SRT được pixel-reflow lần cuối.
+
+Kết quả:
+- 1 dòng;
+- cùng cỡ font;
+- không crop mất đầu/cuối chữ;
+- không cần auto-shrink thô.

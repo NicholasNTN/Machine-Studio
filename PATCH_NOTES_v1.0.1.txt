@@ -1,0 +1,38 @@
+MachineScope Studio v1.0.1 — ONE-LINE SUB
+
+YÊU CẦU
+Subtitle luôn chỉ hiển thị 1 dòng như video short/TikTok, không còn xếp 2–3 dòng.
+
+CÁCH LÀM
+1. Text dài KHÔNG bị ép xuống dòng.
+2. App tự chia một câu TTS dài thành nhiều cue subtitle ngắn liên tiếp.
+3. Các cue con vẫn nằm hoàn toàn bên trong start/end voice thật.
+4. Thời lượng từng cue được chia tương đối theo lượng từ/ký tự.
+5. Live Preview tự giảm font nếu một cue còn sát chiều rộng.
+6. Final ASS render không tạo \N trong chế độ 1 dòng.
+
+Ví dụ voice 4 giây:
+"world's largest land machines, designed for heavy-duty earth moving"
+
+Có thể thành:
+00:01.00–00:02.20  world's largest land machines,
+00:02.20–00:03.35  designed for heavy-duty
+00:03.35–00:05.00  earth moving
+
+Mỗi thời điểm chỉ có 1 dòng.
+
+SETTING MỚI
+- 1 dòng tự động: mặc định BẬT.
+- Ký tự tối đa: mặc định 30.
+- Font nhỏ nhất: mặc định 24.
+- Độ rộng subtitle vẫn chỉnh bằng chuột/thông số.
+
+DỊCH SUB
+Sau khi Gemini dịch:
+- giữ nguyên outer timeline của voice,
+- tự reflow thành cue 1 dòng,
+- không kéo subtitle dài hơn narration.
+
+SRT IMPORT
+- SRT được tự reflow theo 1 dòng nếu setting đang bật.
+- ASS/SSA import giữ nguyên vì có style/timing riêng.
