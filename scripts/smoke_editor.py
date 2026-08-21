@@ -33,6 +33,12 @@ def main() -> int:
     dialog.close()
     assert window.undo_shortcut is not None
     assert window.redo_shortcut is not None
+    assert window.side_bg_type.findText("Hình ảnh") >= 0
+    assert window.context_inspector._controls[("video", "fit_mode")].count() == 2
+    assert window.url.placeholderText() == "Paste video link here..."
+    window.script_style.setCurrentText("Before and after")
+    assert window.tts_voice_b.isVisibleTo(window.voice_settings_box)
+    assert window.editor_layer_key_mode.findText("Chroma Key") >= 0
     QTimer.singleShot(250, window.close)
     QTimer.singleShot(350, application.quit)
     return application.exec()
