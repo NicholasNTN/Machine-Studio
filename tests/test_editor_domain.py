@@ -51,6 +51,25 @@ class EditorDomainTests(unittest.TestCase):
         self.assertIn("fatal-detail", saved); self.assertIn("return_code=3", saved)
         self.assertIn("EXPORT FAILED", saved)
 
+    def test_boxblur_radii_are_safe_for_real_and_tiny_zones(self):
+        cases = ((235, 60, 15, (15, 14)), (973, 112, 15, (15, 15)),
+                 (20, 12, 15, (5, 2)), (8, 8, 15, (3, 1)))
+        for width, height, desired, expected in cases:
+            value, luma, chroma = ffmpeg_engine.boxblur_filter(width, height, desired)
+            self.assertEqual((luma, chroma), expected)
+            self.assertLess(luma, min(width, height) / 2)
+            self.assertLess(chroma, min(width, height) / 4)
+            self.assertIn(f"chroma_radius={chroma}", value)
+            self.assertNotEqual(value, "boxblur=15:2")
+
+    def test_blur_crop_is_even_and_inside_output(self):
+        for value in ((-4, -9, 1, 1), (1079, 1919, 99, 99), (802, 80, 235, 60)):
+            x, y, width, height = ffmpeg_engine.safe_blur_crop_rect(*value, 1080, 1920)
+            self.assertGreaterEqual(x, 0); self.assertGreaterEqual(y, 0)
+            self.assertGreaterEqual(width, 2); self.assertGreaterEqual(height, 2)
+            self.assertLessEqual(x + width, 1080); self.assertLessEqual(y + height, 1920)
+            self.assertEqual((x % 2, y % 2, width % 2, height % 2), (0, 0, 0, 0))
+
     def test_canvas_fit_geometry_stays_inside_canvas(self):
         cases = ((1080, 1920, 1920, 1080), (1920, 1080, 1080, 1920), (1080, 1350, 1080, 1920), (1080, 1080, 1920, 1080))
         for sw, sh, cw, ch in cases:

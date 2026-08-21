@@ -446,6 +446,31 @@ def _safe_volume(value: float) -> float:
     return max(0.0, min(3.0, float(value)))
 
 
+def safe_boxblur_radii(width: int, height: int, desired_radius: int) -> tuple[int, int]:
+    """Clamp luma/chroma radii for a YUV420 crop (FFmpeg uses strict limits)."""
+    minimum = max(0, min(int(width), int(height)))
+    desired = max(0, int(desired_radius))
+    max_luma = max(0, (minimum - 1) // 2)
+    max_chroma = max(0, (minimum - 1) // 4)
+    return min(desired, max_luma), min(desired, max_chroma)
+
+
+def safe_blur_crop_rect(x, y, width, height, output_width, output_height) -> tuple[int, int, int, int]:
+    """Return an in-bounds, even YUV420 crop of at least 2x2 pixels."""
+    out_w = max(2, int(output_width)); out_h = max(2, int(output_height))
+    x = max(0, min(out_w - 2, int(round(x)))); y = max(0, min(out_h - 2, int(round(y))))
+    x -= x % 2; y -= y % 2
+    width = max(2, min(out_w - x, int(round(width)))); height = max(2, min(out_h - y, int(round(height))))
+    width -= width % 2; height -= height % 2
+    return x, y, max(2, width), max(2, height)
+
+
+def boxblur_filter(width: int, height: int, desired_radius: int) -> tuple[str, int, int]:
+    luma, chroma = safe_boxblur_radii(width, height, desired_radius)
+    value = f"boxblur=luma_radius={luma}:luma_power=2:chroma_radius={chroma}:chroma_power=2"
+    return value, luma, chroma
+
+
 def export_video(
     input_path: str,
     output_path: str,
@@ -658,29 +683,32 @@ def export_video(
             "h_px": max(2, options.blur_h),
         }]
 
-    if options.blur_enabled and getattr(options, "auto_cover_source_subtitle", False):
-        auto_zone = dict(getattr(options, "auto_subtitle_zone", {}) or {})
-        if not auto_zone:
-            auto_zone = {"x": 10, "y": 69, "w": 80, "h": 15, "auto": True}
-        if not any(z.get("source") == "auto_subtitle" or z.get("auto") for z in zones):
-            zones.append(auto_zone)
-
     if options.blur_enabled:
-        style = getattr(options, "blur_style", "Đen mờ")
-        opacity = max(0, min(100, int(getattr(options, "blur_opacity", 20))))
         for zi, z in enumerate(zones):
+            style = str(z.get("style") or getattr(options, "blur_style", "Đen mờ"))
+            zone_strength = z.get("strength", getattr(options, "blur_opacity", 20))
+            try: opacity = max(0, min(100, int(float(zone_strength))))
+            except (TypeError, ValueError): opacity = max(0, min(100, int(getattr(options, "blur_opacity", 20))))
             if "x_px" in z:
-                x = int(z["x_px"]); y = int(z["y_px"])
-                zw = int(z["w_px"]); zh = int(z["h_px"])
+                raw_x = z["x_px"]; raw_y = z["y_px"]
+                raw_w = z["w_px"]; raw_h = z["h_px"]
             else:
                 mapped = source_zone_canvas_rect(
                     z, info.get("width") or out_w, info.get("height") or out_h,
                     out_w, out_h, transform,
                 )
-                x, y = max(0, round(mapped.x)), max(0, round(mapped.y))
-                zw, zh = max(2, round(mapped.width)), max(2, round(mapped.height))
-                zw = min(zw, max(2, out_w - x))
-                zh = min(zh, max(2, out_h - y))
+                raw_x, raw_y, raw_w, raw_h = mapped.x, mapped.y, mapped.width, mapped.height
+            x, y, zw, zh = safe_blur_crop_rect(raw_x, raw_y, raw_w, raw_h, out_w, out_h)
+            desired_radius = 0 if style == "Đen mờ" else max(0, round(4 + opacity * 0.22))
+            blur_filter, luma_radius, chroma_radius = boxblur_filter(zw, zh, desired_radius)
+            blur_log = (
+                "[BLUR EXPORT]\n"
+                f"id={z.get('id', '')}\nsource={z.get('source', 'manual')}\n"
+                f"rect={x},{y},{zw},{zh}\ndesired_radius={desired_radius}\n"
+                f"luma_radius={luma_radius}\nchroma_radius={chroma_radius}"
+            )
+            if log: log(blur_log)
+            if log_file: append_render_log(log_file, blur_log)
 
             if style == "Đen mờ":
                 alpha = max(0.02, min(1.0, opacity / 100.0))
@@ -689,10 +717,9 @@ def export_video(
                     f"color=black@{alpha:.3f}:t=fill[vzone{zi}]"
                 )
             else:
-                strength = max(3, round(4 + opacity * 0.22))
                 fc += [
                     f"[{current}]split=2[zbase{zi}][zcrop{zi}]",
-                    f"[zcrop{zi}]crop={zw}:{zh}:{x}:{y},boxblur={strength}:2[zblur{zi}]",
+                    f"[zcrop{zi}]crop={zw}:{zh}:{x}:{y},{blur_filter}[zblur{zi}]",
                     f"[zbase{zi}][zblur{zi}]overlay={x}:{y}[vzone{zi}]",
                 ]
             current = f"vzone{zi}"
