@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from core.subtitle_sizing import ass_font_size, canonical_font_size, preview_font_pixels
 from editor.selection_ref import SelectionRef
@@ -20,6 +22,7 @@ from editor.preview_binding import PreviewBinding, binding_after_clip_change
 from editor.sequence_manager import SequenceManager
 from core.ai_styles import AI_STYLES, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
+from core.models import AIProject
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -195,6 +198,14 @@ class EditorDomainTests(unittest.TestCase):
         second = manager.create(); second.state.update({"narration_path": "voice-b.wav", "preview_cues": [(0, 1, "B")], "blur_zones": [{"id": "b"}]})
         manager.activate(first.id); self.assertEqual(manager.active.state["narration_path"], "voice-a.wav")
         manager.activate(second.id); self.assertEqual(manager.active.state["blur_zones"][0]["id"], "b")
+
+    def test_multi_sequence_project_schema_round_trip(self):
+        manager = SequenceManager(); manager.create("Timeline 2")
+        project = AIProject(active_sequence_id=manager.active_sequence_id, sequences=manager.to_dict()["sequences"])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "project.json"; project.save(path); restored = AIProject.load(path)
+        self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
+        self.assertEqual([item["name"] for item in restored.sequences], ["Timeline 1", "Timeline 2"])
 
 
 if __name__ == "__main__":
