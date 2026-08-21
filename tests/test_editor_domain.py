@@ -24,6 +24,7 @@ from core.media_library import migrate_global_media_library
 from core.sequence_context import active_editor_source, active_narration_path, find_origin_sequence
 from core.sequence_context import sequence_narration_path
 from core.file_dialog_history import FileDialogHistory
+from core.render_snapshot import build_render_snapshot, snapshot_resolution
 from editor.text_style import TextStyle
 from editor.blur_zone import normalize_blur_zones
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -35,6 +36,78 @@ from core.models import AIProject
 
 
 class EditorDomainTests(unittest.TestCase):
+    def test_render_snapshot_captures_complete_sequence_state(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); video = root / "video.mp4"; voice = root / "voice.wav"; logo = root / "logo.png"; image = root / "sticker.png"
+            for path in (video, voice, logo, image): path.write_bytes(b"asset")
+            manager = SequenceManager(); sequence = manager.active
+            sequence.state = {
+                "editor_use_timeline": True, "resolution": "1920x1080 (YouTube)", "project_aspect_ratio": "9:16",
+                "editor_clips": [{"path": str(video), "enabled": True, "source_start": 1, "source_end": 6,
+                                  "transform": {"fit_mode": "fill", "position_x": 42, "scale_x": 115}}],
+                "canvas_background": {"mode": "blur", "blur_strength": 31, "brightness": -22, "opacity": 85},
+                "narration_path": str(voice), "narration_volume": 77, "mute_original_voice": True,
+                "blur_enabled": True, "blur_zones": [{"id": "blur-a", "x": 1, "y": 2, "w": 30, "h": 10}],
+                "sub_enabled": True, "subtitle_path": str(root / "captions.srt"), "preview_cues": [[0, 1, "Hi"]],
+                "subtitle_style": {"font_name": "Arial", "font_size": 48},
+                "logo_enabled": True, "logo_path": str(logo), "logo_opacity": 80,
+                "editor_layers": [{"id": "text-a", "type": "text", "enabled": True, "text": "Title", "start": 0, "end": 2},
+                                  {"id": "image-a", "type": "image", "enabled": True, "path": str(image)}],
+            }
+            snapshot = build_render_snapshot(manager.sequences, sequence.id)
+        self.assertEqual(snapshot.sequence_id, sequence.id); self.assertEqual(snapshot.canvas["mode"], "blur")
+        self.assertEqual(snapshot.video_transform["fit_mode"], "fill"); self.assertEqual(snapshot.audio["narration_path"], str(voice))
+        self.assertEqual(snapshot.audio["source_audio_mode"], "Tắt toàn bộ âm gốc")
+        self.assertTrue(snapshot.blur["enabled"]); self.assertTrue(snapshot.subtitle["enabled"]); self.assertTrue(snapshot.logo["enabled"])
+        self.assertEqual([layer["id"] for layer in snapshot.layers], ["text-a", "image-a"])
+        self.assertEqual(snapshot.export_options().resolution, "1080x1920")
+
+    def test_render_snapshot_isolated_and_round_trips_with_sequence_manager(self):
+        manager = SequenceManager(); first = manager.active
+        first.state = {"narration_path": "voice-a.wav", "canvas_background": {"mode": "blur"}, "editor_layers": [{"id": "a", "type": "text"}]}
+        second = manager.create(); second.state = {"narration_path": "voice-b.wav", "canvas_background": {"mode": "solid", "color": "#123456"}}
+        third = manager.create(); third.state = {"narration_path": "", "canvas_background": {"mode": "image", "image_path": "missing.png"}}
+        before = [build_render_snapshot(manager.sequences, item.id).to_dict() for item in manager.sequences]
+        restored = SequenceManager.from_dict(manager.to_dict())
+        after = [build_render_snapshot(restored.sequences, item.id).to_dict() for item in restored.sequences]
+        self.assertEqual(before, after)
+        self.assertEqual(before[0]["audio"]["narration_path"], "voice-a.wav")
+        self.assertEqual(before[1]["canvas"]["color"], "#123456")
+        self.assertFalse(before[2]["audio"]["narration_enabled"])
+        self.assertIn("Canvas image background", build_render_snapshot(restored.sequences, third.id).validate().errors[0])
+
+    def test_snapshot_resolution_follows_preview_canvas_aspect(self):
+        self.assertEqual(snapshot_resolution({"resolution": "1920x1080 (YouTube)", "aspect_ratio": "9:16"}), "1080x1920")
+        self.assertEqual(snapshot_resolution({"resolution": "1080x1920", "aspect_ratio": "16:9"}), "1920x1080")
+        self.assertEqual(snapshot_resolution({"resolution": "Original", "aspect_ratio": "9:16"}), "Original")
+        self.assertEqual(snapshot_resolution({"resolution": "Original", "aspect_ratio": "9:16", "canvas_dimensions": [1080, 1920]}), "1080x1920")
+
+    def test_timeline_renderer_emits_all_canvas_background_modes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); video = root / "video.mp4"; image = root / "background.png"
+            video.write_bytes(b"video"); image.write_bytes(b"image")
+            clip = {"path": str(video), "enabled": True, "source_start": 0, "source_end": 2, "transform": {"fit_mode": "fit"}}
+            graphs = {}
+
+            def fake_run(cmd, **_kwargs):
+                Path(cmd[-1]).write_bytes(b"x" * 2048)
+                graphs[current[0]] = cmd[cmd.index("-filter_complex") + 1]
+
+            info = {"duration": 2.0, "has_audio": True, "width": 1920, "height": 1080, "normalized_path": str(video)}
+            with patch.object(ffmpeg_engine, "probe", return_value=info), \
+                 patch.object(ffmpeg_engine, "find_binary", return_value="ffmpeg"), \
+                 patch.object(ffmpeg_engine, "run", side_effect=fake_run):
+                for mode in ("blur", "solid", "image", "none"):
+                    current = [mode]
+                    editor_engine.render_timeline(
+                        [clip], str(root / f"{mode}.mp4"), target_width=1080, target_height=1920,
+                        canvas_background={"mode": mode, "image_path": str(image), "color": "#123456", "blur_strength": 31},
+                    )
+        self.assertIn("boxblur=31", graphs["blur"])
+        self.assertIn("color=c=0x123456", graphs["solid"])
+        self.assertIn("force_original_aspect_ratio=increase,crop=1080:1920", graphs["image"])
+        self.assertIn("color=c=black", graphs["none"])
+
     def test_active_sequence_narration_never_falls_back_to_other_timeline(self):
         manager = SequenceManager(); first = manager.active
         first.state["narration_path"] = "voice-a.wav"

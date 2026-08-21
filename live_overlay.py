@@ -706,7 +706,6 @@ class InteractivePreviewOverlay(QWidget):
                 p.setOpacity(
                     max(0.05, min(1.0, self.logo_opacity / 100))
                 )
-                p.translate(rect.center()); p.rotate(float(layer.get("rotation", 0))); p.translate(-rect.center())
                 if not self._logo_pixmap.isNull():
                     p.drawPixmap(rect.toRect(), self._logo_pixmap)
                 else:

@@ -12,6 +12,7 @@ import time
 from . import ffmpeg_engine as ffm
 from editor.video_transform import VideoTransform
 from editor.text_style import TextStyle
+from editor.canvas import CanvasBackground
 
 
 class EditorError(RuntimeError):
@@ -186,6 +187,7 @@ def render_timeline(
     process_holder=None,
     log_file=None,
     stage: str = "timeline render",
+    canvas_background=None,
 ) -> str:
     """Render trimmed/reordered clips into one normalized H.264/AAC timeline."""
     active = [normalize_clip(c) for c in clips if c.get("enabled", True) and clip_duration(c) >= 0.05]
@@ -220,6 +222,13 @@ def render_timeline(
         infos.append(info)
         cmd += ["-i", clip["path"]]
 
+    canvas = CanvasBackground.from_dict(canvas_background)
+    image_input_indices = []
+    if canvas.mode == "image" and canvas.image_path and Path(canvas.image_path).is_file():
+        for _clip in active:
+            image_input_indices.append(len(active) + len(image_input_indices))
+            cmd += ["-loop", "1", "-i", canvas.image_path]
+
     filters = []
     concat_inputs = []
 
@@ -238,13 +247,31 @@ def render_timeline(
         if transform.flip_vertical: transform_filters.append("vflip")
         if abs(transform.rotation) > 0.001: transform_filters.append(f"rotate={transform.rotation}*PI/180:ow=rotw(iw):oh=roth(ih):c=none")
         transform_filters += ["format=rgba", f"colorchannelmixer=aa={max(0.0, min(1.0, transform.opacity / 100.0)):.4f}"]
-        filters.append(
-            f"[{i}:v]"
-            f"trim=start={start:.6f}:end={end:.6f},"
-            "setpts=PTS-STARTPTS,"
-            f"{','.join(transform_filters)},setsar=1,fps=30[vt{i}]"
-        )
-        filters.append(f"color=c=black:s={out_w}x{out_h}:r=30:d={dur:.6f}[vc{i}]")
+        source_trim = f"trim=start={start:.6f}:end={end:.6f},setpts=PTS-STARTPTS"
+        if canvas.mode == "blur":
+            blur = max(1, min(80, int(canvas.blur_strength)))
+            brightness = max(-1.0, min(1.0, float(canvas.brightness) / 100.0))
+            opacity = max(0.0, min(1.0, float(canvas.opacity) / 100.0))
+            filters.append(f"[{i}:v]{source_trim},split=2[vbgsrc{i}][vfgsrc{i}]")
+            filters.append(f"[vfgsrc{i}]{','.join(transform_filters)},setsar=1,fps=30[vt{i}]")
+            filters.append(
+                f"[vbgsrc{i}]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+                f"crop={out_w}:{out_h},boxblur={blur}:3,eq=brightness={brightness:.3f},"
+                f"format=rgba,colorchannelmixer=aa={opacity:.3f}[vc{i}]"
+            )
+        else:
+            filters.append(f"[{i}:v]{source_trim},{','.join(transform_filters)},setsar=1,fps=30[vt{i}]")
+            if canvas.mode == "image" and len(image_input_indices) == len(active):
+                image_idx = image_input_indices[i]
+                fit = str(canvas.image_fit).lower()
+                if fit == "stretch": bg_filter = f"scale={out_w}:{out_h}"
+                elif fit == "contain": bg_filter = f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:black"
+                else: bg_filter = f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h}"
+                opacity = max(0.0, min(1.0, float(canvas.opacity) / 100.0))
+                filters.append(f"[{image_idx}:v]{bg_filter},trim=duration={dur:.6f},setpts=PTS-STARTPTS,format=rgba,colorchannelmixer=aa={opacity:.3f}[vc{i}]")
+            else:
+                color = str(canvas.color or "#000000").replace("#", "0x") if canvas.mode == "solid" else "black"
+                filters.append(f"color=c={color}:s={out_w}x{out_h}:r=30:d={dur:.6f}[vc{i}]")
         filters.append(f"[vc{i}][vt{i}]overlay=x='{x}':y='{y}':shortest=1,format=yuv420p[v{i}]")
 
         if info.get("has_audio") and not clip.get("muted", False):

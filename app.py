@@ -69,6 +69,7 @@ from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styl
 from core.speaker_role_service import analyze_speaker_roles
 from core.media_library import migrate_global_media_library
 from core.sequence_context import active_editor_source, active_narration_path, find_origin_sequence, sequence_narration_path
+from core.render_snapshot import build_render_snapshot
 
 
 APP_NAME = "Machine Studio"
@@ -7907,6 +7908,7 @@ class MainWindow(QMainWindow):
                 getattr(self, "preview_zoom_percent", 100)
             ),
             "project_aspect_ratio": self.editor_document.aspect_ratio,
+            "project_canvas_dimensions": list(self.project_canvas_dimensions()),
             "subtitle_group_id": self._current_subtitle_group_id(),
             "subtitle_groups": self.editor_document.subtitle_groups_to_dict(),
             "workspace_splitter_sizes": (
@@ -8177,96 +8179,9 @@ class MainWindow(QMainWindow):
             self.editor_refresh_all()
         self.update_live_overlay_state()
 
-    def gather_export_options(self, sequence_id=None):
-        fit_mode = "Fit"
-        canvas_background = self.current_canvas_background()
-
-        source_audio_mode = "Giữ âm gốc"
-        if self.mute_original_voice.isChecked():
-            if self.accompaniment_path and Path(self.accompaniment_path).exists():
-                source_audio_mode = "Chỉ nhạc nền đã tách"
-            else:
-                source_audio_mode = "Tắt toàn bộ âm gốc"
-
-        if sequence_id is None:
-            narration = self.voice_file.text().strip() or self.narration_path
-            narration_volume = max(0.0, min(1.5, self.narration_volume.value() / 100.0))
-        else:
-            narration = sequence_narration_path(self.sequence_manager.sequences, sequence_id)
-            sequence = find_origin_sequence(self.sequence_manager.sequences, sequence_id)
-            sequence_state = sequence.state if sequence is not None and isinstance(sequence.state, dict) else {}
-            narration_volume = max(0.0, min(1.5, safe_float(sequence_state.get("narration_volume"), 100.0) / 100.0))
-
-        music_volume = 0.0 if self.mute_music.isChecked() else self.music_volume.value() / 100.0
-
-        return ExportOptions(
-            resolution=self.resolution.currentText(),
-            fit_mode=fit_mode,
-            canvas_background_mode=canvas_background["mode"],
-            canvas_background_image=canvas_background["image_path"],
-            canvas_background_image_fit=canvas_background["image_fit"],
-            canvas_background_color=canvas_background["color"],
-            canvas_background_opacity=canvas_background["opacity"],
-            canvas_background_blur=canvas_background["blur_strength"],
-            canvas_background_brightness=canvas_background["brightness"],
-            video_transform=(VideoTransform.from_dict(self.editor_clips[self.editor_selected_clip].get("transform", {})).to_dict() if 0 <= self.editor_selected_clip < len(self.editor_clips) else VideoTransform().to_dict()),
-            codec=self.codec.currentText(),
-            encoder=self.encoder.currentText(),
-
-            speed=self.play_speed.value() if self.speed_enabled.isChecked() else 1.0,
-            zoom=1.0,
-            auto_zoom=False,
-            mirror=False,
-            border=0,
-            brightness=0.0,
-            contrast=1.0,
-            saturation=1.0,
-            sharpen=0.0,
-            vignette=False,
-            strip_metadata=self.strip_metadata.isChecked(),
-
-            burn_subtitle=self.sub_enabled.isChecked(),
-            subtitle_path=self.sub_path.text().strip(),
-            subtitle_style=self.current_subtitle_style(),
-
-            logo_path=self.logo_path.text().strip() if self.logo_enabled.isChecked() else "",
-            logo_position=self.logo_pos.currentText(),
-            logo_scale=self.logo_scale.value() / 100.0,
-            logo_x_percent=self.logo_x.value(),
-            logo_y_percent=self.logo_y.value(),
-            logo_opacity=self.logo_opacity.value(),
-            logo_remove_white_bg=self.logo_remove_bg.isChecked(),
-
-            overlay_text=self.overlay_text.text().strip() if self.overlay_enabled.isChecked() else "",
-            overlay_position=self.overlay_pos.currentText(),
-            overlay_font_name=self.overlay_font.currentFont().family(),
-            overlay_font_size=self.overlay_size.value(),
-            overlay_color=self.overlay_color.text().strip() or "#FFFFFF",
-            overlay_x_percent=self.overlay_x.value(),
-            overlay_y_percent=self.overlay_y.value(),
-
-            editor_layers=[
-                dict(layer) for layer in self.editor_layers
-            ],
-
-            blur_enabled=self.blur_enabled.isChecked(),
-            blur_zones=self.blur_zones(),
-            blur_style=self.blur_style.currentText(),
-            blur_opacity=self.blur_opacity.value(),
-            auto_cover_source_subtitle=self.auto_cover_source_sub.isChecked(),
-            auto_subtitle_zone=self.auto_subtitle_zone(),
-
-            source_audio_mode=source_audio_mode,
-            source_volume=self.source_volume.value() / 100.0,
-            accompaniment_path=self.accompaniment_path,
-            narration_path=narration,
-            narration_volume=narration_volume,
-            narration_speed=1.0,
-            background_music_path=self.music_file.text().strip(),
-            background_music_volume=music_volume,
-            background_music_loop=True,
-            duck_source_under_voice=True,
-        )
+    def gather_export_options(self, snapshot):
+        """Compatibility boundary: FFmpeg options come only from an immutable snapshot."""
+        return snapshot.export_options()
 
     def export_batch(self):
         export_sequence_id = self.sequence_manager.active_sequence_id
@@ -8285,11 +8200,11 @@ class MainWindow(QMainWindow):
             if not self.voice_file.text().strip():
                 self.voice_file.setText(active_voice_path)
         self.capture_active_sequence()
-        has_editor_timeline = (
-            hasattr(self, "editor_use_timeline")
-            and self.editor_use_timeline.isChecked()
-            and bool(self.editor_clips)
-        )
+        snapshot = build_render_snapshot(self.sequence_manager.sequences, export_sequence_id)
+        has_editor_timeline = bool(snapshot.output.get("editor_use_timeline") and snapshot.clips)
+        source_queue = tuple(self.queue)
+        output_names = dict(getattr(self, "batch_output_names", {}) or {})
+        export_name = str(getattr(self, "export_name_override", "") or "")
         if not self.queue and not has_editor_timeline:
             QMessageBox.warning(self, "Xuất Video", "Chưa có video.")
             return
@@ -8315,7 +8230,18 @@ class MainWindow(QMainWindow):
                             + traceback.format_exc()
                         )
 
-            options = self.gather_export_options(export_sequence_id)
+            validation = snapshot.validate()
+            if validation.errors:
+                QMessageBox.warning(self, "Xuất Video", "Render snapshot không hợp lệ:\n- " + "\n- ".join(validation.errors))
+                return
+            for warning in validation.warnings:
+                self.log_line(f"[RENDER SNAPSHOT WARNING] {warning}")
+            for fallback in snapshot.legacy_fallbacks:
+                self.log_line(f"[RENDER SNAPSHOT LEGACY FALLBACK] {fallback}")
+            snapshot_log = ROOT / "logs" / "render_snapshot.json"
+            snapshot_log.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_log.write_text(json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8", errors="replace")
+            options = self.gather_export_options(snapshot)
             export_sequence_narration_path = options.narration_path
             narration_check = ffm.validate_audio_file(options.narration_path) if options.narration_path else None
             if narration_check is not None and not narration_check["valid"]:
@@ -8354,6 +8280,15 @@ class MainWindow(QMainWindow):
                     f"sequence_path={export_sequence_narration_path}",
                     f"export_path={options.narration_path}",
                 ]))
+                if not options.narration_path:
+                    ffm.append_render_log(export_ffmpeg_log, "\n".join([
+                        "[RENDER SNAPSHOT AUDIO]", f"sequence_id={snapshot.sequence_id}",
+                        f"preview_narration_path={preview_narration_path}",
+                        f"sequence_narration_path={sequence_path_before_capture}",
+                        "snapshot_narration_path=", "exists=False", "size=0", "duration=0",
+                        "mean_volume=None", "max_volume=None", "narration_enabled=False",
+                        f"narration_volume={snapshot.audio.get('narration_volume', 0)}",
+                    ]))
 
             def verify_narration_source():
                 nonlocal narration_signal
@@ -8366,6 +8301,17 @@ class MainWindow(QMainWindow):
                     f"duration={narration_signal['duration']}", f"has_audio={narration_signal['has_audio']}",
                     f"mean_volume={narration_signal['mean_volume']}", f"max_volume={narration_signal['max_volume']}",
                     f"audible={narration_signal['audible']}",
+                ]))
+                ffm.append_render_log(export_ffmpeg_log, "\n".join([
+                    "[RENDER SNAPSHOT AUDIO]", f"sequence_id={snapshot.sequence_id}",
+                    f"preview_narration_path={preview_narration_path}",
+                    f"sequence_narration_path={sequence_path_before_capture}",
+                    f"snapshot_narration_path={snapshot.audio.get('narration_path', '')}",
+                    f"exists={narration_signal['exists']}", f"size={narration_signal['size']}",
+                    f"duration={narration_signal['duration']}", f"mean_volume={narration_signal['mean_volume']}",
+                    f"max_volume={narration_signal['max_volume']}",
+                    f"narration_enabled={snapshot.audio.get('narration_enabled', False)}",
+                    f"narration_volume={snapshot.audio.get('narration_volume', 0)}",
                 ]))
                 if not narration_signal["audible"]:
                     raise RuntimeError(
@@ -8404,11 +8350,11 @@ class MainWindow(QMainWindow):
             def next_target(source_path):
                 stem = Path(source_path).stem
                 custom_name = False
-                if getattr(self, "batch_output_names", None):
-                    mapped = self.batch_output_names.get(Path(source_path).name)
+                if output_names:
+                    mapped = output_names.get(Path(source_path).name)
                     if mapped: stem = mapped; custom_name = True
-                if getattr(self, "export_name_override", "") and (len(self.queue) <= 1 or "MachineStudio_Timeline" in source_path):
-                    stem = self.export_name_override; custom_name = True
+                if export_name and (len(source_queue) <= 1 or "MachineStudio_Timeline" in source_path):
+                    stem = export_name; custom_name = True
                 base = out_dir / f"{stem}{'' if custom_name else '_MS'}.mp4"
                 if not base.exists():
                     return base
@@ -8419,22 +8365,15 @@ class MainWindow(QMainWindow):
                 return out_dir / f"{stem}_MS_{int(datetime.datetime.now().timestamp())}.mp4"
 
             # Basic Editor timeline replaces batch sources when enabled.
-            if (
-                hasattr(self, "editor_use_timeline")
-                and self.editor_use_timeline.isChecked()
-                and self.editor_clips
-            ):
+            if has_editor_timeline:
                 target = next_target("MachineStudio_Timeline.mp4")
                 temp_target = target.with_name(
                     target.stem + ".__rendering__.mp4"
                 )
 
-                workspace = self.project_workspace_for(
-                    self.current_video()
-                    or self.editor_clips[0]["path"]
-                )
+                workspace = self.project_workspace_for(snapshot.clips[0]["path"])
                 timeline_source = workspace / "editor_timeline_source.mp4"
-                begin_attempt(" | ".join(str(clip.get("path", "")) for clip in self.editor_clips), str(target))
+                begin_attempt(" | ".join(str(clip.get("path", "")) for clip in snapshot.clips), str(target))
 
                 target_size = ffm.parse_resolution(
                     options.resolution
@@ -8444,21 +8383,22 @@ class MainWindow(QMainWindow):
 
                 log("===== BASIC EDITOR TIMELINE EXPORT =====")
                 log(
-                    f"[EDITOR] clips={len(self.editor_clips)} | "
-                    f"duration={editor_engine.total_duration(self.editor_clips):.2f}s"
+                    f"[EDITOR] clips={len(snapshot.clips)} | "
+                    f"duration={snapshot.duration:.2f}s"
                 )
 
                 try:
                     verify_narration_source()
                     editor_engine.render_timeline(
-                        self.editor_clips, str(timeline_source), target_width=tw,
+                        list(snapshot.clips), str(timeline_source), target_width=tw,
                         target_height=th, preview=False, log=log,
                         process_holder=self.process_holder, log_file=export_ffmpeg_log,
-                        stage="timeline render",
+                        stage="timeline render", canvas_background=snapshot.canvas,
                     )
                     progress(1, 2)
                     # Per-clip transforms were already baked by render_timeline.
                     options.video_transform = VideoTransform().to_dict()
+                    options.canvas_background_mode = "none"
                     ffm.export_video(
                         str(timeline_source), str(temp_target), options, log=log,
                         process_holder=self.process_holder, log_file=export_ffmpeg_log,
@@ -8474,7 +8414,7 @@ class MainWindow(QMainWindow):
                 progress(2, 2)
                 return outputs
 
-            for i, source in enumerate(list(self.queue)):
+            for i, source in enumerate(source_queue):
                 if self.stop_requested:
                     break
 
@@ -8485,7 +8425,7 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
-                log(f"===== [{i+1}/{len(self.queue)}] {Path(source).name} =====")
+                log(f"===== [{i+1}/{len(source_queue)}] {Path(source).name} =====")
                 log(f"[OUTPUT] {target}")
                 begin_attempt(source, str(target))
 
@@ -8513,7 +8453,7 @@ class MainWindow(QMainWindow):
                     raise
 
                 outputs.append(str(target))
-                progress(i + 1, len(self.queue))
+                progress(i + 1, len(source_queue))
             return outputs
 
         def done(outputs):
