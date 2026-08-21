@@ -222,6 +222,35 @@ def probe(path: str) -> dict:
     }
 
 
+def validate_audio_file(path: str) -> dict:
+    value = str(path or "").strip()
+    result = {"path": value, "exists": False, "has_audio": False, "duration": 0.0, "valid": False}
+    if not value: return result
+    target = Path(value)
+    if not target.is_file() or target.stat().st_size <= 0: return result
+    result["exists"] = True
+    try: info = probe(value)
+    except Exception: return result
+    result.update(has_audio=bool(info.get("has_audio")), duration=float(info.get("duration", 0) or 0))
+    result["valid"] = result["has_audio"] and result["duration"] > 0
+    return result
+
+
+def verify_output_audio(path: str, log_file=None) -> dict:
+    info = probe(path)
+    result = {"has_audio": bool(info.get("has_audio")), "duration": float(info.get("duration", 0) or 0),
+              "mean_volume": None, "max_volume": None}
+    if not result["has_audio"]: return result
+    ffmpeg = find_binary("ffmpeg")
+    output = run([ffmpeg, "-hide_banner", "-i", path, "-vn", "-af", "volumedetect", "-f", "null", "-"],
+                 log_file=log_file)
+    for key in ("mean_volume", "max_volume"):
+        match = re.search(rf"{key}:\s*(-?inf|-?\d+(?:\.\d+)?)\s*dB", output, re.I)
+        if match:
+            result[key] = float("-inf") if match.group(1).lower() == "-inf" else float(match.group(1))
+    return result
+
+
 _NVENC_RUNTIME_OK = None
 
 
@@ -444,6 +473,20 @@ def _audio_duration(path: str) -> float:
 
 def _safe_volume(value: float) -> float:
     return max(0.0, min(3.0, float(value)))
+
+
+def normalized_audio_filters(volume: float, speed: float = 1.0) -> list[str]:
+    filters = ["aresample=48000", "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"]
+    if abs(speed - 1.0) > 0.001: filters.append(_atempo_chain(speed))
+    filters.append(f"volume={_safe_volume(volume):.3f}")
+    return filters
+
+
+def audio_mix_filter(labels: list[str]):
+    if not labels: return None, None
+    if len(labels) == 1: return labels[0], None
+    joined = "".join(f"[{label}]" for label in labels)
+    return "aout", f"{joined}amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0[aout]"
 
 
 def safe_boxblur_radii(width: int, height: int, desired_radius: int) -> tuple[int, int]:
@@ -837,34 +880,25 @@ def export_video(
     mode = options.source_audio_mode
 
     if mode == "Chỉ nhạc nền đã tách" and accompaniment_idx is not None:
-        filters = ["aresample=48000"]
-        if abs(options.speed - 1.0) > 0.001:
-            filters.append(_atempo_chain(options.speed))
-        filters.append(f"volume={_safe_volume(options.source_volume):.3f}")
+        filters = normalized_audio_filters(options.source_volume, options.speed)
         fc.append(f"[{accompaniment_idx}:a]{','.join(filters)}[abase]")
         base_audio_label = "abase"
     elif mode != "Tắt toàn bộ âm gốc" and info["has_audio"]:
-        filters = ["aresample=48000"]
-        if abs(options.speed - 1.0) > 0.001:
-            filters.append(_atempo_chain(options.speed))
-        filters.append(f"volume={_safe_volume(options.source_volume):.3f}")
+        filters = normalized_audio_filters(options.source_volume, options.speed)
         fc.append(f"[0:a]{','.join(filters)}[abase]")
         base_audio_label = "abase"
 
     narration_label = None
     if narration_idx is not None:
         n_speed = max(0.25, min(4.0, options.narration_speed * options.speed))
-        filters = ["aresample=48000"]
-        if abs(n_speed - 1.0) > 0.001:
-            filters.append(_atempo_chain(n_speed))
-        filters.append(f"volume={_safe_volume(options.narration_volume):.3f}")
+        filters = normalized_audio_filters(options.narration_volume, n_speed)
         fc.append(f"[{narration_idx}:a]{','.join(filters)}[anar]")
         narration_label = "anar"
 
     music_label = None
     if music_idx is not None:
         fc.append(
-            f"[{music_idx}:a]aresample=48000,volume={_safe_volume(options.background_music_volume):.3f}[amusic]"
+            f"[{music_idx}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={_safe_volume(options.background_music_volume):.3f}[amusic]"
         )
         music_label = "amusic"
 
@@ -877,19 +911,21 @@ def export_video(
         base_audio_label = "aducked"
 
     mix_labels = [x for x in [base_audio_label, narration_label, music_label] if x]
-    audio_label = None
-    if len(mix_labels) == 1:
-        audio_label = mix_labels[0]
-    elif len(mix_labels) > 1:
-        joined = ''.join(f'[{x}]' for x in mix_labels)
-        fc.append(
-            f"{joined}amix=inputs={len(mix_labels)}:duration=longest:dropout_transition=2[aout]"
-        )
-        audio_label = "aout"
+    audio_label, mix_filter = audio_mix_filter(mix_labels)
+    if mix_filter: fc.append(mix_filter)
 
     cmd += ["-filter_complex", ";".join(fc), "-map", f"[{current}]"]
     if audio_label:
         cmd += ["-map", f"[{audio_label}]"]
+    if log_file:
+        narration_info = validate_audio_file(options.narration_path) if options.narration_path else {"exists": False, "duration": 0}
+        append_render_log(log_file, "\n".join([
+            "[AUDIO EXPORT]", f"narration_expected={bool(options.narration_path)}",
+            f"narration_path={options.narration_path}", f"narration_exists={narration_info['exists']}",
+            f"narration_duration={narration_info['duration']}",
+            f"source_audio_enabled={base_audio_label is not None}", f"music_enabled={music_label is not None}",
+            f"audio_map={[audio_label] if audio_label else []}",
+        ]))
 
     if fast_preview:
         # Background cache should not steal responsiveness from the editor.

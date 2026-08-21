@@ -12,3 +12,11 @@ def active_editor_source(clips):
 
 def find_origin_sequence(sequences, sequence_id):
     return next((sequence for sequence in sequences if sequence.id == sequence_id), None)
+
+
+def sequence_narration_path(sequences, sequence_id):
+    """Resolve narration solely from the stable sequence id; never another UI mirror."""
+    sequence = find_origin_sequence(sequences, sequence_id)
+    if sequence is None or not isinstance(sequence.state, dict): return ""
+    value = sequence.state.get("narration_path", "")
+    return str(value).strip() if not isinstance(value, (dict, list, tuple)) else ""
