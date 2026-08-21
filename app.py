@@ -12,6 +12,7 @@ import datetime
 from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
+from uuid import uuid4
 
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
 from PySide6.QtGui import (
@@ -59,6 +60,7 @@ from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from editor.blur_zone import BlurZone
 from editor.sequence_manager import SequenceManager
+from editor.text_style import TextStyle
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 from core.audio_state import AudioState, replace_narration_source
 from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes
@@ -737,7 +739,10 @@ class MainWindow(QMainWindow):
         self.media_panel = MediaPanel()
         self.voice_tool_panel = ActionListPanel("Voice", (), "Use the complete Voice settings on the right.")
         self.subtitle_tool_panel = ActionListPanel("Phụ đề", (), "Use Subtitle & Translation settings on the right.")
-        self.text_tool_panel = ActionListPanel("Text", (), "Manual text layers are independent from subtitles.")
+        self.text_tool_panel = ActionListPanel("Text", ("+ Add Text",), "Manual text layers are independent from subtitles.")
+        self.text_tool_panel.primaryRequested.connect(self.editor_add_text_layer)
+        self.text_tool_panel.itemSelected.connect(self._select_text_from_tool)
+        self.text_tool_panel.contextMenuRequested.connect(self._text_tool_context_menu)
         self.blur_tool_panel = ActionListPanel("Blur", (), "Use complete Blur Zones settings on the right.")
         self.customize_tool_panel = ActionListPanel("Tùy chỉnh", (), "Logo, watermark, and playback speed settings.")
         self.advanced_tool_panel = ActionListPanel("Nâng cao", (), "Side background and overlay text settings.")
@@ -759,10 +764,9 @@ class MainWindow(QMainWindow):
         self.advanced_settings_box.layout().insertWidget(1, composition)
 
         text_page = QWidget(); text_layout = QVBoxLayout(text_page); text_layout.setContentsMargins(0, 0, 0, 0)
-        add_text = QPushButton("+ Add Text"); add_text.clicked.connect(self.editor_add_text_layer)
         text_hint = QLabel("Manual Text có nội dung, font, màu, vị trí, kích thước, xoay, độ mờ và thời gian riêng; không thay đổi phụ đề.")
         text_hint.setObjectName("hint"); text_hint.setWordWrap(True)
-        text_layout.addWidget(add_text); text_layout.addWidget(text_hint); text_layout.addWidget(self.editor_layer_props_panel)
+        text_layout.addWidget(text_hint); text_layout.addWidget(self.editor_layer_props_panel)
         self.editor_layer_props_panel.setVisible(True)
 
         voice_page = QWidget(); voice_layout = QVBoxLayout(voice_page); voice_layout.setContentsMargins(0, 0, 0, 0); voice_layout.addWidget(self.voice_settings_box); voice_layout.addWidget(self.voice_audio_strip)
@@ -891,6 +895,23 @@ class MainWindow(QMainWindow):
         for path in self.queue:
             self.thumbnail_service.request(path)
         self.blur_tool_panel.set_items([f"Blur {i + 1}" for i in range(len(self.blur_zones()))])
+        self.text_tool_panel.set_items([str(layer.get("name") or layer.get("text") or f"Text {index + 1}") for index, layer in enumerate(self.editor_layers) if layer.get("type") == "text"])
+
+    def _select_text_from_tool(self, text_index):
+        texts = [(index, layer) for index, layer in enumerate(self.editor_layers) if layer.get("type") == "text"]
+        if not (0 <= text_index < len(texts)): return
+        index, _layer = texts[text_index]; self.editor_selected_layer = index; self.editor_select_extra_layer_in_list(index)
+        self.live_overlay.selected_type = "editor_layer"; self.live_overlay.selected_index = index; self.live_overlay.update(); self.settings_panel.set_page("text")
+
+    def _text_tool_context_menu(self, text_index, global_pos):
+        texts = [(index, layer) for index, layer in enumerate(self.editor_layers) if layer.get("type") == "text"]
+        if not (0 <= text_index < len(texts)): return
+        index, layer = texts[text_index]; menu = QMenu(self); rename = menu.addAction("Rename"); duplicate = menu.addAction("Duplicate"); delete = menu.addAction("Delete"); chosen = menu.exec(global_pos)
+        if chosen == rename:
+            name, ok = QInputDialog.getText(self, "Rename Text", "Name", text=str(layer.get("name") or layer.get("text") or "Text"))
+            if ok and name.strip(): layer["name"] = name.strip(); self._refresh_professional_panels(); self.schedule_autosave()
+        elif chosen == duplicate: self.on_live_overlay_duplicate_requested("editor_layer", index)
+        elif chosen == delete: self.on_live_overlay_delete_requested("editor_layer", index)
 
     def _select_blur_from_tool(self, index):
         if index < 0: return
@@ -1455,6 +1476,9 @@ class MainWindow(QMainWindow):
         self.live_overlay.videoTransformChanged.connect(self.on_live_video_transform_changed)
         self.live_overlay.interactionFinished.connect(self.on_live_overlay_interaction_finished)
         self.live_overlay.selectionChanged.connect(self.on_live_overlay_selection_changed)
+        self.live_overlay.objectContextRequested.connect(self.on_live_overlay_context_menu)
+        self.live_overlay.deleteRequested.connect(self.on_live_overlay_delete_requested)
+        self.live_overlay.editRequested.connect(self.on_live_overlay_edit_requested)
         self.video_sink.videoFrameChanged.connect(self.live_overlay.set_video_frame)
 
         preview_layout.addWidget(self.live_overlay)
@@ -2117,6 +2141,7 @@ class MainWindow(QMainWindow):
         sequence = self.sequence_manager.active
         self.capture_project_state(sequence_capture=False)
         state = self.export_state_dict()
+        state.pop("workspace_splitter_sizes", None)
         state.update({"preview_cues": list(self.preview_cues), "subtitle_editor_text": self.sub_editor.toPlainText(),
                       "subtitle_path": self.sub_path.text().strip(), "narration_path": self.narration_path})
         sequence.state = deepcopy(state); sequence.ai_project = self._project_payload()
@@ -2437,6 +2462,22 @@ class MainWindow(QMainWindow):
         self.editor_layer_color_btn.clicked.connect(
             lambda: self.pick_color(self.editor_layer_color)
         )
+        self.editor_text_preset = QComboBox(); self.editor_text_preset.addItems(subtitle_engine.list_presets())
+        self.editor_text_preset.currentTextChanged.connect(self.apply_text_preset_to_selected)
+        self.editor_text_outline = QDoubleSpinBox(); self.editor_text_outline.setRange(0, 20); self.editor_text_outline.setValue(2)
+        self.editor_text_outline_color = QLineEdit("#000000")
+        self.editor_text_bold = QCheckBox("Bold"); self.editor_text_bold.setChecked(True)
+        self.editor_text_italic = QCheckBox("Italic")
+        self.editor_text_background = QCheckBox("Text Background")
+        self.editor_text_background_color = QLineEdit("#000000")
+        self.editor_text_uppercase = QCheckBox("Uppercase")
+        self.editor_text_shadow = QDoubleSpinBox(); self.editor_text_shadow.setRange(0, 20); self.editor_text_shadow.setValue(1)
+        self.editor_text_width = QDoubleSpinBox(); self.editor_text_width.setRange(10, 100); self.editor_text_width.setValue(80); self.editor_text_width.setSuffix(" %")
+        self.editor_text_alignment = QComboBox(); self.editor_text_alignment.addItems(["Left", "Center", "Right"])
+        self.editor_text_animation = QComboBox(); self.editor_text_animation.addItems(["Không", "Fade", "Slide Up", "Pop", "Bounce", "Typewriter"])
+        self.editor_text_anim_duration = QSpinBox(); self.editor_text_anim_duration.setRange(60, 1200); self.editor_text_anim_duration.setValue(220); self.editor_text_anim_duration.setSuffix(" ms")
+        self.editor_text_anim_strength = QSpinBox(); self.editor_text_anim_strength.setRange(10, 200); self.editor_text_anim_strength.setValue(100); self.editor_text_anim_strength.setSuffix(" %")
+        self.editor_text_scale = QDoubleSpinBox(); self.editor_text_scale.setRange(10, 500); self.editor_text_scale.setValue(100); self.editor_text_scale.setSuffix(" %")
 
         props.addWidget(QLabel("Nội dung"), 0, 0)
         props.addWidget(self.editor_layer_text, 0, 1, 1, 5)
@@ -2456,10 +2497,11 @@ class MainWindow(QMainWindow):
         props.addWidget(self.editor_layer_font, 3, 1, 1, 3)
         props.addWidget(self.editor_layer_color, 3, 4)
         props.addWidget(self.editor_layer_color_btn, 3, 5)
-        props.addWidget(QLabel("Rotation"), 4, 0); props.addWidget(self.editor_layer_rotation, 4, 1)
-        props.addWidget(QLabel("Background Removal"), 4, 2); props.addWidget(self.editor_layer_key_mode, 4, 3)
-        props.addWidget(self.editor_layer_key_color, 4, 4); props.addWidget(self.editor_layer_similarity, 4, 5)
-        props.addWidget(QLabel("Key blend"), 5, 0); props.addWidget(self.editor_layer_blend, 5, 1)
+        props.addWidget(QLabel("Preset"), 4, 0); props.addWidget(self.editor_text_preset, 4, 1, 1, 3); props.addWidget(self.editor_text_bold, 4, 4); props.addWidget(self.editor_text_italic, 4, 5)
+        props.addWidget(QLabel("Outline"), 5, 0); props.addWidget(self.editor_text_outline, 5, 1); props.addWidget(self.editor_text_outline_color, 5, 2); props.addWidget(self.editor_text_shadow, 5, 3); props.addWidget(self.editor_text_background, 5, 4); props.addWidget(self.editor_text_background_color, 5, 5)
+        props.addWidget(self.editor_text_uppercase, 6, 0); props.addWidget(QLabel("Width"), 6, 1); props.addWidget(self.editor_text_width, 6, 2); props.addWidget(self.editor_text_alignment, 6, 3); props.addWidget(QLabel("Scale"), 6, 4); props.addWidget(self.editor_text_scale, 6, 5)
+        props.addWidget(QLabel("Animation"), 7, 0); props.addWidget(self.editor_text_animation, 7, 1); props.addWidget(self.editor_text_anim_duration, 7, 2); props.addWidget(self.editor_text_anim_strength, 7, 3); props.addWidget(QLabel("Rotation"), 7, 4); props.addWidget(self.editor_layer_rotation, 7, 5)
+        props.addWidget(QLabel("Background Removal"), 8, 0); props.addWidget(self.editor_layer_key_mode, 8, 1); props.addWidget(self.editor_layer_key_color, 8, 2); props.addWidget(self.editor_layer_similarity, 8, 3); props.addWidget(QLabel("Key blend"), 8, 4); props.addWidget(self.editor_layer_blend, 8, 5)
 
         self.editor_layer_hint = QLabel(
             "Kéo layer trên Preview; kéo handle góc phải để resize. "
@@ -2467,7 +2509,7 @@ class MainWindow(QMainWindow):
         )
         self.editor_layer_hint.setObjectName("hint")
         self.editor_layer_hint.setWordWrap(True)
-        props.addWidget(self.editor_layer_hint, 6, 0, 1, 6)
+        props.addWidget(self.editor_layer_hint, 9, 0, 1, 6)
 
         for widget in [
             self.editor_layer_text,
@@ -2480,12 +2522,17 @@ class MainWindow(QMainWindow):
             self.editor_layer_rotation, self.editor_layer_key_mode, self.editor_layer_key_color, self.editor_layer_similarity, self.editor_layer_blend,
             self.editor_layer_font,
             self.editor_layer_color,
+            self.editor_text_outline, self.editor_text_outline_color, self.editor_text_bold, self.editor_text_italic,
+            self.editor_text_background, self.editor_text_background_color, self.editor_text_uppercase, self.editor_text_shadow,
+            self.editor_text_width, self.editor_text_alignment, self.editor_text_animation, self.editor_text_anim_duration,
+            self.editor_text_anim_strength, self.editor_text_scale,
         ]:
             signal = (
                 getattr(widget, "textChanged", None)
                 or getattr(widget, "valueChanged", None)
                 or getattr(widget, "currentTextChanged", None)
                 or getattr(widget, "currentFontChanged", None)
+                or getattr(widget, "toggled", None)
             )
             if signal:
                 signal.connect(self.editor_layer_params_changed)
@@ -2685,6 +2732,7 @@ class MainWindow(QMainWindow):
         if track_kind != "video":
             self.status("Drop video media on the Video track.")
             return
+        origin_sequence_id = self.sequence_manager.active_sequence_id
         worker = Worker(lambda progress, log: editor_engine.make_clip(path))
         self._retain_worker(worker)
         def done(clip):
@@ -2695,7 +2743,7 @@ class MainWindow(QMainWindow):
             self.editor_clips.insert(int(insert_at), clip)
             self.editor_selected_clip = int(insert_at); self.editor_use_timeline.setChecked(True)
             self.editor_refresh_all(); self.editor_clip_selected(self.editor_selected_clip); self.schedule_autosave()
-        worker.done.connect(done); worker.error.connect(self.worker_error); worker.start()
+        worker.done.connect(lambda clip: self._deliver_sequence_job_result(origin_sequence_id, done, clip)); worker.error.connect(self.worker_error); worker.start()
 
     def _timeline_item_selected(self, kind, item_id, legacy_index):
         item = next((item for item in self.editor_document.timeline.items if item.id == item_id), None)
@@ -3184,6 +3232,8 @@ class MainWindow(QMainWindow):
             )
             return
 
+        origin_sequence_id = self.sequence_manager.active_sequence_id
+        clips = [dict(clip) for clip in self.editor_clips]
         workspace = self.project_workspace_for(
             self.current_video()
             or self.editor_clips[0]["path"]
@@ -3192,7 +3242,7 @@ class MainWindow(QMainWindow):
 
         def job(progress, log):
             return editor_engine.render_timeline(
-                self.editor_clips,
+                clips,
                 str(out),
                 preview=True,
                 log=log,
@@ -3213,6 +3263,7 @@ class MainWindow(QMainWindow):
             "Đang render Timeline Preview...",
             job,
             done,
+            sequence_id=origin_sequence_id,
         )
 
     # ------------------------------------------------------------------
@@ -3465,6 +3516,11 @@ class MainWindow(QMainWindow):
                 self.editor_layer_opacity,
                 self.editor_layer_font,
                 self.editor_layer_color,
+                self.editor_text_preset, self.editor_text_outline, self.editor_text_outline_color,
+                self.editor_text_bold, self.editor_text_italic, self.editor_text_background,
+                self.editor_text_background_color, self.editor_text_uppercase, self.editor_text_shadow,
+                self.editor_text_width, self.editor_text_alignment, self.editor_text_animation,
+                self.editor_text_anim_duration, self.editor_text_anim_strength, self.editor_text_scale,
             ]
             for w in widgets:
                 w.blockSignals(True)
@@ -3482,6 +3538,15 @@ class MainWindow(QMainWindow):
                 self.editor_layer_color.setText(
                     str(layer.get("color", "#FFFFFF") or "#FFFFFF")
                 )
+                self.editor_text_preset.setCurrentText(str(layer.get("preset", "Documentary Clean")))
+                self.editor_text_outline.setValue(float(layer.get("outline_width", 2)))
+                self.editor_text_outline_color.setText(str(layer.get("outline_color", "#000000")))
+                self.editor_text_bold.setChecked(bool(layer.get("bold", True))); self.editor_text_italic.setChecked(bool(layer.get("italic", False)))
+                self.editor_text_background.setChecked(bool(layer.get("background_box", False))); self.editor_text_background_color.setText(str(layer.get("background_color", "#000000")))
+                self.editor_text_uppercase.setChecked(bool(layer.get("uppercase", False))); self.editor_text_shadow.setValue(float(layer.get("shadow", 1)))
+                self.editor_text_width.setValue(float(layer.get("width", 80))); self.editor_text_alignment.setCurrentText(str(layer.get("alignment", "Center")))
+                self.editor_text_animation.setCurrentText(str(layer.get("animation", "Không"))); self.editor_text_anim_duration.setValue(int(layer.get("animation_duration_ms", 220)))
+                self.editor_text_anim_strength.setValue(int(layer.get("animation_strength", 100))); self.editor_text_scale.setValue(float(layer.get("scale", 100)))
                 self.editor_layer_font.setEnabled(True)
                 self.editor_layer_color.setEnabled(True)
                 self.editor_layer_color_btn.setEnabled(True)
@@ -3579,6 +3644,15 @@ class MainWindow(QMainWindow):
                 self.editor_layer_color.text().strip()
                 or "#FFFFFF"
             )
+            layer.update({
+                "preset": self.editor_text_preset.currentText(), "outline_width": self.editor_text_outline.value(),
+                "outline_color": self.editor_text_outline_color.text().strip() or "#000000", "bold": self.editor_text_bold.isChecked(),
+                "italic": self.editor_text_italic.isChecked(), "background_box": self.editor_text_background.isChecked(),
+                "background_color": self.editor_text_background_color.text().strip() or "#000000", "uppercase": self.editor_text_uppercase.isChecked(),
+                "shadow": self.editor_text_shadow.value(), "width": self.editor_text_width.value(), "alignment": self.editor_text_alignment.currentText(),
+                "animation": self.editor_text_animation.currentText(), "animation_duration_ms": self.editor_text_anim_duration.value(),
+                "animation_strength": self.editor_text_anim_strength.value(), "scale": self.editor_text_scale.value(),
+            })
         else:
             layer["scale"] = self.editor_layer_size.value()
 
@@ -3586,6 +3660,14 @@ class MainWindow(QMainWindow):
         self.update_live_overlay_state()
         self.editor_refresh_layer_list()
         self.schedule_autosave()
+
+    def apply_text_preset_to_selected(self, name):
+        index = getattr(self, "editor_selected_layer", -1)
+        if not (0 <= index < len(self.editor_layers)) or self.editor_layers[index].get("type") != "text" or name not in subtitle_engine.PRESETS: return
+        before = [dict(layer) for layer in self.editor_layers]
+        style = TextStyle.from_subtitle_preset(subtitle_engine.clone_preset(name))
+        self.editor_layers[index].update(style.to_dict())
+        self.editor_layer_selected(self.editor_layer_list.currentRow()); self.update_live_overlay_state(); self._push_layer_undo("Apply text preset", before); self.schedule_autosave()
 
     def editor_edit_selected_layer(self):
         item = self.editor_layer_list.currentItem()
@@ -4677,11 +4759,14 @@ class MainWindow(QMainWindow):
             for sequence in self.sequence_manager.sequences:
                 sequence.state.pop("media_bin", None)
                 sequence.state.pop("media_display_names", None)
+                sequence.state.pop("workspace_splitter_sizes", None)
             self.media_panel._display_names = media_names
             self.queue_list.clear()
             for media_path in self.queue:
                 self.queue_list.addItem(QListWidgetItem(Path(media_path).name))
             self._refresh_professional_panels()
+            if isinstance(project.export_state, dict) and project.export_state.get("workspace_splitter_sizes"):
+                self.video_editor_tab.restore_sizes(project.export_state["workspace_splitter_sizes"])
             self._sequence_undo_stacks = {sequence.id: QUndoStack(self) for sequence in self.sequence_manager.sequences}
             self.refresh_sequence_tabs()
             if project.sequences:
@@ -6188,7 +6273,14 @@ class MainWindow(QMainWindow):
             self.editor_document.selection.clear()
             self.editor_timeline.set_selected_item("")
             return
-        if kind == "blur" and index >= 0:
+        if kind == "video":
+            if self.editor_clips:
+                if not (0 <= self.editor_selected_clip < len(self.editor_clips)): self.editor_selected_clip = 0
+                clip = self.editor_clips[self.editor_selected_clip]
+                self.editor_document.selection.select("video", str(clip.get("id", "")))
+                self.settings_panel.set_page("video_clip")
+                self.context_inspector.load_properties("video", {**clip, **clip.get("transform", {})})
+        elif kind == "blur" and index >= 0:
             self.settings_panel.set_page("blur")
             self.editor_document.selection.select("blur", f"blur:{index}")
             self.editor_timeline.set_selected_item(f"blur:{index}")
@@ -6219,6 +6311,52 @@ class MainWindow(QMainWindow):
             self.editor_document.selection.select(selection_kind, str(layer.get("id", "")), str(layer.get("group_id", "")))
             self.editor_timeline.set_selected_item(str(layer.get("id", "")))
             self.context_inspector.load_properties(selection_kind, layer)
+            self.editor_selected_layer = index
+            self.editor_select_extra_layer_in_list(index)
+
+        self.editor_document.synchronize_legacy_items()
+        self._refresh_professional_panels()
+
+    def on_live_overlay_context_menu(self, kind, index, global_pos):
+        menu = QMenu(self); properties = menu.addAction("Properties / Edit")
+        duplicate = menu.addAction("Duplicate"); duplicate.setEnabled(kind in ("blur", "editor_layer"))
+        menu.addSeparator(); delete = menu.addAction("Delete"); delete.setEnabled(kind != "video")
+        chosen = menu.exec(global_pos)
+        if chosen == properties: self.on_live_overlay_edit_requested(kind, index)
+        elif chosen == duplicate: self.on_live_overlay_duplicate_requested(kind, index)
+        elif chosen == delete: self.on_live_overlay_delete_requested(kind, index)
+
+    def on_live_overlay_duplicate_requested(self, kind, index):
+        if kind == "blur":
+            zones = self.all_live_blur_zones()
+            if 0 <= index < len(zones):
+                zone = dict(zones[index]); zone.pop("_list_row", None); zone["auto"] = False
+                zone["x"] = min(97.0, float(zone.get("x", 0)) + 2); zone["y"] = min(97.0, float(zone.get("y", 0)) + 2)
+                self.add_blur_zone(zone)
+        elif kind == "editor_layer" and 0 <= index < len(self.editor_layers):
+            before = [dict(layer) for layer in self.editor_layers]
+            duplicate = deepcopy(self.editor_layers[index]); duplicate["id"] = f"{duplicate.get('type', 'layer')}-{uuid4().hex[:10]}"
+            duplicate["x"] = min(98.0, float(duplicate.get("x", 50)) + 2); duplicate["y"] = min(98.0, float(duplicate.get("y", 50)) + 2)
+            self.editor_layers.insert(index + 1, duplicate); self.editor_selected_layer = index + 1
+            self.editor_refresh_layer_list(); self.editor_select_extra_layer_in_list(index + 1); self.update_live_overlay_state(); self._push_layer_undo("Duplicate layer", before); self.schedule_autosave()
+
+    def on_live_overlay_delete_requested(self, kind, index):
+        if kind == "blur":
+            zones = self.all_live_blur_zones()
+            if 0 <= index < len(zones):
+                self.blur_zone_list.setCurrentRow(int(zones[index].get("_list_row", index))); self.remove_blur_zone()
+        elif kind == "editor_layer" and 0 <= index < len(self.editor_layers):
+            before = [dict(layer) for layer in self.editor_layers]; self.editor_layers.pop(index); self.editor_selected_layer = -1
+            self.editor_refresh_layer_list(); self.update_live_overlay_state(); self._push_layer_undo("Delete layer", before); self.schedule_autosave()
+        elif kind == "logo": self.logo_enabled.setChecked(False)
+        elif kind == "text": self.overlay_enabled.setChecked(False)
+        elif kind == "sub": self.sub_enabled.setChecked(False)
+
+    def on_live_overlay_edit_requested(self, kind, index):
+        self.on_live_overlay_selection_changed(kind, index)
+        if kind == "editor_layer" and 0 <= index < len(self.editor_layers): self.editor_edit_selected_layer()
+        elif kind == "blur": self.settings_panel.set_page("blur"); self.blur_params_toggle.setChecked(True)
+        elif kind == "text": self.overlay_text.setFocus()
 
     def toggle_blur_params(self, checked):
         self.blur_params_panel.setVisible(checked)
@@ -8266,6 +8404,7 @@ class MainWindow(QMainWindow):
         return "540x960"
 
     def refresh_processed_preview(self, background=True):
+        origin_sequence_id = self.sequence_manager.active_sequence_id
         source = self.current_video() or self.project.video_path
         if not source or not Path(source).exists():
             return
@@ -8356,8 +8495,8 @@ class MainWindow(QMainWindow):
             if self.preview_dirty:
                 self.preview_render_timer.start()
 
-        worker.error.connect(render_error)
-        worker.done.connect(render_done)
+        worker.error.connect(lambda tb: self._deliver_sequence_job_result(origin_sequence_id, render_error, tb))
+        worker.done.connect(lambda path: self._deliver_sequence_job_result(origin_sequence_id, render_done, path))
         worker.start()
 
     def cleanup_old_preview_proxies(self):

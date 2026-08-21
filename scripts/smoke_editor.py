@@ -9,7 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QPointF, QTimer
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPixmap
 from app import MainWindow
@@ -32,6 +33,13 @@ def main() -> int:
     application.processEvents()
     assert window.video_editor_tab.vertical_splitter.sizes()[1] >= 180
     assert window.editor_panel.isVisible()
+    overlay = window.live_overlay; overlay.resize(500, 500); overlay.set_video_image(QImage(1080, 1920, QImage.Format_RGB32))
+    overlay.set_blur_state(True, "Trong mờ", 50, [{"x": 40, "y": 40, "w": 20, "h": 20}])
+    blur_center = overlay.pct_rect(overlay.blur_zones[0]).center()
+    assert overlay.hit_test(blur_center) == ("blur", 0)
+    overlay.set_editor_layers([{"id": "text-smoke", "type": "text", "text": "Text", "x": 50, "y": 50, "start": 0, "end": 10}], 1)
+    assert overlay.hit_test(overlay.editor_layer_rect(0).center()) == ("editor_layer", 0)
+    assert window.text_tool_panel.action_buttons[0].text() == "+ Add Text"
     for page in ("media", "voice", "subtitle", "text", "blur", "customize", "advanced", "video_clip"):
         assert window.settings_panel.has_page(page)
     for tool in ("voice", "subtitle", "text", "blur", "customize", "advanced"):

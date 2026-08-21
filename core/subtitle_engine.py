@@ -650,13 +650,21 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         color = _hex_to_ass_inline(str(layer.get("color", "#FFFFFF") or "#FFFFFF"))
         opacity = max(1, min(100, int(layer.get("opacity", 100) or 100)))
         alpha = round(255 * (1 - opacity / 100))
-        body = _wrap_caption(text_value, 80, False)
+        body = _wrap_caption(text_value, max(1, int(layer.get("max_chars", 80) or 80)), bool(layer.get("uppercase", False)))
+        align = {"Left": 4, "Right": 6}.get(str(layer.get("alignment", "Center")), 5)
+        outline_color = _hex_to_ass_inline(str(layer.get("outline_color", "#000000") or "#000000"))
+        background_color = _hex_to_ass_inline(str(layer.get("background_color", "#000000") or "#000000"))
         tags = (
-            rf"\an5\pos({tx},{ty})"
+            rf"\an{align}\pos({tx},{ty})"
             rf"\fn{font_name}\fs{font_size}"
             rf"\1c{color}\1a&H{alpha:02X}&"
-            rf"\bord2\shad1"
+            rf"\3c{outline_color}\bord{max(0, float(layer.get('outline_width', 2))):.1f}"
+            rf"\shad{max(0, float(layer.get('shadow', 1))):.1f}"
+            rf"\b{1 if layer.get('bold', True) else 0}\i{1 if layer.get('italic', False) else 0}"
+            rf"\fscx{max(10, float(layer.get('scale', 100))):.1f}\fscy{max(10, float(layer.get('scale', 100))):.1f}"
+            rf"\frz{float(layer.get('rotation', 0)):.1f}"
         )
+        if layer.get("background_box", False): tags += rf"\4c{background_color}\4a&H{round(255 * (1 - float(layer.get('background_opacity', 65)) / 100)):02X}&\bord{max(2, float(layer.get('outline_width', 2))):.1f}"
         events.append(
             f"Dialogue: {3 + layer_index},{_ass_time(start)},{_ass_time(end)},"
             f"Overlay,,0,0,0,,{{{tags}}}{body}"

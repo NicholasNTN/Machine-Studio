@@ -11,6 +11,7 @@ import time
 
 from . import ffmpeg_engine as ffm
 from editor.video_transform import VideoTransform
+from editor.text_style import TextStyle
 
 
 class EditorError(RuntimeError):
@@ -317,10 +318,7 @@ def make_text_layer(
         "text": str(text or "Text"),
         "x": float(x),
         "y": float(y),
-        "font_name": "Arial",
-        "font_size": 52,
-        "color": "#FFFFFF",
-        "opacity": 100,
+        **TextStyle().to_dict(),
         "start": 0.0,
         "end": max(0.1, float(total_seconds or 0.1)),
     }

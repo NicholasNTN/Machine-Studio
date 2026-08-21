@@ -16,10 +16,11 @@ from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core.audio_state import AudioState, replace_narration_source, audio_source_is_loadable
 from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes, sanitize_workspace_splitter_sizes
-from core import subtitle_engine
+from core import editor_engine, subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from core.media_library import migrate_global_media_library
 from core.sequence_context import active_editor_source, find_origin_sequence
+from editor.text_style import TextStyle
 from editor.layer_order import CANONICAL_LAYER_ORDER
 from editor.preview_binding import PreviewBinding, binding_after_clip_change
 from editor.sequence_manager import SequenceManager
@@ -269,6 +270,15 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(manager.active.state["script"], "B")
         manager.close(origin.id)
         self.assertIsNone(find_origin_sequence(manager.sequences, origin.id))
+
+    def test_manual_text_style_copies_preset_then_diverges_from_subtitle(self):
+        subtitle = subtitle_engine.clone_preset("Cinema Gold")
+        text = TextStyle.from_subtitle_preset(subtitle)
+        text.font_size = 90; text.color = "#FF0000"
+        self.assertEqual(subtitle.font_size, 46)
+        self.assertEqual(subtitle.primary_color, "#F6D77A")
+        layer = editor_engine.make_text_layer("Text", 5.0); layer.update(text.to_dict())
+        self.assertEqual(layer["font_size"], 90); self.assertIn("outline_width", layer); self.assertIn("animation", layer)
 
     def test_multi_sequence_project_schema_round_trip(self):
         manager = SequenceManager(); manager.create("Timeline 2")

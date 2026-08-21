@@ -32,6 +32,9 @@ class InteractivePreviewOverlay(QWidget):
     videoTransformChanged = Signal(dict)
     interactionFinished = Signal()
     selectionChanged = Signal(str, int)
+    objectContextRequested = Signal(str, int, object)
+    deleteRequested = Signal(str, int)
+    editRequested = Signal(str, int)
 
     HANDLE = 12
 
@@ -312,9 +315,9 @@ class InteractivePreviewOverlay(QWidget):
 
         # text
         text = str(layer.get("text", "Text") or "Text")
-        scale = max(0.45, vr.height() / 1920 * 1.6)
+        scale = max(0.45, vr.height() / 1920 * 1.6) * max(0.1, float(layer.get("scale", 100)) / 100.0)
         px = max(12, int(float(layer.get("font_size", 52)) * scale))
-        width = min(vr.width() * 0.92, max(90, len(text) * px * 0.62))
+        width = min(vr.width() * 0.98, max(90, vr.width() * float(layer.get("width", 80)) / 100.0))
         height = max(34, px * 1.65)
         return QRectF(cx - width/2, cy - height/2, width, height)
 
@@ -777,24 +780,24 @@ class InteractivePreviewOverlay(QWidget):
                         p.drawText(rect, Qt.AlignCenter, "VIDEO" if layer.get("type") == "video" else "IMAGE")
                 else:
                     text = str(layer.get("text", "Text") or "Text")
+                    if layer.get("uppercase", False): text = text.upper()
                     vr_scale = max(0.45, vr.height() / 1920 * 1.6)
-                    px = max(12, int(float(layer.get("font_size", 52)) * vr_scale))
+                    px = max(12, int(float(layer.get("font_size", 52)) * vr_scale * max(0.1, float(layer.get("scale", 100)) / 100.0)))
                     font = QFont(str(layer.get("font_name", "Arial") or "Arial"))
                     font.setPixelSize(px)
-                    font.setBold(True)
+                    font.setBold(bool(layer.get("bold", True))); font.setItalic(bool(layer.get("italic", False)))
                     p.setFont(font)
-                    p.setPen(QColor("#000000"))
-                    p.drawText(
-                        rect.translated(2, 2),
-                        Qt.AlignCenter | Qt.TextWordWrap,
-                        text,
-                    )
+                    if layer.get("background_box", False):
+                        bg = QColor(str(layer.get("background_color", "#000000"))); bg.setAlpha(round(255 * float(layer.get("background_opacity", 65)) / 100)); p.fillRect(rect, bg)
+                    rotation = float(layer.get("rotation", 0)); p.translate(rect.center()); p.rotate(rotation); p.translate(-rect.center())
+                    alignment = {"Left": Qt.AlignLeft, "Right": Qt.AlignRight}.get(str(layer.get("alignment", "Center")), Qt.AlignHCenter) | Qt.AlignVCenter | Qt.TextWordWrap
+                    shadow = max(0, int(round(float(layer.get("shadow", 1))))); outline = max(0, int(round(float(layer.get("outline_width", 2)))))
+                    if shadow: p.setPen(QColor("#000000")); p.drawText(rect.translated(shadow, shadow), alignment, text)
+                    if outline:
+                        p.setPen(QColor(str(layer.get("outline_color", "#000000"))))
+                        for ox, oy in ((-outline,0),(outline,0),(0,-outline),(0,outline)): p.drawText(rect.translated(ox, oy), alignment, text)
                     p.setPen(QColor(str(layer.get("color", "#FFFFFF") or "#FFFFFF")))
-                    p.drawText(
-                        rect,
-                        Qt.AlignCenter | Qt.TextWordWrap,
-                        text,
-                    )
+                    p.drawText(rect, alignment, text)
 
                 p.restore()
 
@@ -978,6 +981,20 @@ class InteractivePreviewOverlay(QWidget):
     # ==========================================================
     # MOUSE INTERACTION
     # ==========================================================
+    def hit_test(self, pos):
+        """Return the top-most visible editable object under a canvas point."""
+        for i in reversed(range(len(self.editor_layers))):
+            if self.editor_layer_active(self.editor_layers[i]) and self.editor_layer_rect(i).contains(pos):
+                return "editor_layer", i
+        if self.sub_enabled and self.subtitle_rect().contains(pos): return "sub", -1
+        if self.text_enabled and self.overlay_text_rect().contains(pos): return "text", -1
+        if self.logo_enabled and self.logo_rect().contains(pos): return "logo", -1
+        if self.blur_enabled:
+            for i in reversed(range(len(self.blur_zones))):
+                if self.pct_rect(self.blur_zones[i]).contains(pos): return "blur", i
+        if not self._frame_image.isNull() and self.source_display_rect().contains(pos): return "video", -1
+        return "", -1
+
     def mousePressEvent(self, event):
         try:
             pos = event.position()
@@ -990,6 +1007,15 @@ class InteractivePreviewOverlay(QWidget):
                 self.setCursor(Qt.ClosedHandCursor)
                 return
             self.press_pos = QPointF(pos)
+            if event.button() == Qt.RightButton:
+                kind, index = self.hit_test(pos)
+                if kind:
+                    self.selected_type = kind; self.selected_index = index
+                    self.selectionChanged.emit(kind, index); self.update()
+                    self.objectContextRequested.emit(kind, index, event.globalPosition().toPoint())
+                return
+            if event.button() != Qt.LeftButton:
+                return
 
             if self.selected_type == "video" and not self._frame_image.isNull():
                 rect = self.source_display_rect()
@@ -1129,6 +1155,11 @@ class InteractivePreviewOverlay(QWidget):
                         self.update()
                         return
 
+            if not self._frame_image.isNull() and self.source_display_rect().contains(pos):
+                self.selected_type = "video"; self.selected_index = -1
+                self.drag_mode = "move_video"; self.start_video_transform = dict(self.video_transform)
+                self.selectionChanged.emit("video", -1); self.update(); return
+
             self.selected_type = ""
             self.selected_index = -1
             self.drag_mode = ""
@@ -1138,10 +1169,19 @@ class InteractivePreviewOverlay(QWidget):
             self.drag_mode = ""
 
     def mouseDoubleClickEvent(self, event):
-        if self.selected_type == "video" and self.source_display_rect().contains(event.position()):
-            self.video_transform = {"position_x": 50.0, "position_y": 50.0, "scale_x": 100.0, "scale_y": 100.0, "uniform_scale": True, "rotation": 0.0, "opacity": 100.0, "fit_mode": "fit", "flip_horizontal": False, "flip_vertical": False}
-            self.videoTransformChanged.emit(dict(self.video_transform)); self.interactionFinished.emit(); self.update(); return
+        kind, index = self.hit_test(event.position())
+        if kind and kind != "video":
+            self.selected_type = kind; self.selected_index = index
+            self.selectionChanged.emit(kind, index); self.editRequested.emit(kind, index); self.update(); return
+        if kind == "video":
+            self.selected_type = "video"; self.selected_index = -1
+            self.selectionChanged.emit("video", -1); self.editRequested.emit("video", -1); self.update(); return
         super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace) and self.selected_type and self.selected_type != "video":
+            self.deleteRequested.emit(self.selected_type, self.selected_index); event.accept(); return
+        super().keyPressEvent(event)
 
     def mouseMoveEvent(self, event):
         if not self.drag_mode:
