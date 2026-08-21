@@ -2436,10 +2436,38 @@ class MainWindow(QMainWindow):
             f"Timeline: {editor_engine.total_duration(self.editor_clips):.2f} s"
         )
         self.editor_refresh_layer_list()
+        if not self.editor_clips:
+            self.clear_active_timeline_preview()
         if self.editor_timeline_active():
             self.editor_update_master_timeline_ui()
         self.update_live_overlay_state()
         self._refresh_professional_panels()
+
+    def clear_active_timeline_preview(self):
+        """Hard-clear runtime media whenever the active sequence has no video."""
+        self.player.stop()
+        self.pause_live_audio_tracks()
+        self.player.setSource(QUrl())
+        self.playback.detach_narration()
+        self.preview_loaded_path = ""
+        self.preview_pending_position = 0
+        self.preview_should_autoplay = False
+        self.preview_is_processed = False
+        self.editor_selected_clip = -1
+        self.editor_document.set_playhead(0.0)
+        self.editor_document.selection.clear()
+        self.live_overlay.clear_video_frame()
+        self.live_overlay.selected_type = ""
+        self.live_overlay.selected_index = -1
+        self.live_overlay.set_video_transform(VideoTransform().to_dict())
+        self.live_overlay.set_blur_state(False, self.blur_style.currentText(), self.blur_opacity.value(), [])
+        self.editor_timeline.set_selected(-1)
+        self.editor_timeline.set_playhead(0.0)
+        self.editor_duration_label.setText("0.00 s")
+        self.editor_total_label.setText("Timeline: 0.00 s")
+        self.editor_playhead_label.setText("Playhead: 0.00 s")
+        self.preview_state.setText("Add Media — Timeline trống")
+        self.update_live_audio_mix()
 
     def _synchronize_supplemental_timeline_items(self):
         items = []

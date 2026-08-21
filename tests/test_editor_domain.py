@@ -15,6 +15,7 @@ from core.audio_state import AudioState, replace_narration_source, audio_source_
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
+from editor.preview_binding import PreviewBinding, binding_after_clip_change
 from core.ai_styles import AI_STYLES, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 
@@ -145,6 +146,10 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(replacement.source, "new-narration.wav")
         self.assertEqual(replacement.state, state)
         self.assertFalse(audio_source_is_loadable("missing-narration.wav"))
+
+    def test_preview_binding_clears_after_last_clip_deletion(self):
+        current = PreviewBinding("video.mp4", 12.0, 4.0, True)
+        self.assertEqual(binding_after_clip_change([], current), PreviewBinding(None, 0.0, 0.0, False))
 
 
 if __name__ == "__main__":
