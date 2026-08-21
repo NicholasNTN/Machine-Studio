@@ -6,7 +6,7 @@ from editor.snap_engine import SnapEngine
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
-from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle, subtitle_group_is_visible
+from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle, subtitle_group_is_visible, active_subtitle_render_state
 from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
 from editor.blur_zone import BlurZone, source_zone_canvas_rect
 from editor.video_transform import VideoTransform
@@ -116,6 +116,12 @@ class EditorDomainTests(unittest.TestCase):
         legacy_track_visible = False
         self.assertFalse(legacy_track_visible)
         self.assertTrue(subtitle_group_is_visible(True, group))
+
+    def test_subtitle_render_state_does_not_require_selection(self):
+        group = SubtitleGroup("g", "srt", "captions.srt", visible=True)
+        visible, text, start, end = active_subtitle_render_state(True, group, [(1.0, 3.0, "Visible")], 2.0)
+        self.assertTrue(visible)
+        self.assertEqual((text, start, end), ("Visible", 1.0, 3.0))
 
     def test_source_normalized_blur_mapping_across_canvas_ratios(self):
         zone = BlurZone("lower-third", x=.12, y=.73, width=.75, height=.16)

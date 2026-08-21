@@ -51,7 +51,7 @@ from ui.task_progress import TaskProgress
 from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
 from editor.timeline_item import TimelineItem, TimelineItemKind
-from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible
+from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible, active_subtitle_render_state
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from editor.blur_zone import BlurZone
@@ -5742,9 +5742,7 @@ class MainWindow(QMainWindow):
             )
             cue_start = second
             cue_end = second
-            subtitle_visible = self.active_subtitle_visible()
-            if subtitle_visible:
-                text, cue_start, cue_end = self.preview_subtitle_state_at(second)
+            subtitle_visible, text, cue_start, cue_end = self.active_subtitle_preview_state(second)
 
             self.live_overlay.set_subtitle_state(
                 subtitle_visible,
@@ -6985,21 +6983,32 @@ class MainWindow(QMainWindow):
             )
             self.sub_editor.blockSignals(False)
             self.preview_cues = []
+        self.editor_document.changed.emit()
         self.update_preview_subtitle(self.player.position() / 1000)
         self.editor_refresh_all()
+        self.update_live_overlay_state()
+        self.live_overlay.update()
 
     def active_subtitle_visible(self):
-        group = self.editor_document.subtitle_groups.get(self._current_subtitle_group_id())
+        group = self.editor_document.subtitle_groups.get(getattr(self, "subtitle_group_id", ""))
         return subtitle_group_is_visible(self.sub_enabled.isChecked(), group)
+
+    def active_subtitle_preview_state(self, second):
+        group = self.editor_document.subtitle_groups.get(getattr(self, "subtitle_group_id", ""))
+        visible, _text, start, end = active_subtitle_render_state(
+            self.sub_enabled.isChecked(), group, self.preview_cues, second,
+        )
+        if not visible:
+            return False, "", start, end
+        text, start, end = self.preview_subtitle_state_at(second)
+        return True, text, start, end
 
     def set_active_subtitle_visibility(self, enabled):
         group = self.editor_document.subtitle_groups.get(self._current_subtitle_group_id())
         if group is not None: group.visible = bool(enabled)
 
     def _current_subtitle_group_id(self):
-        selection = self.editor_document.selection.current
-        if selection is not None and selection.kind == "subtitle" and selection.group_id:
-            return selection.group_id
+        # Active group belongs to the active document, never to UI selection.
         return getattr(self, "subtitle_group_id", "") or "subtitle-group"
 
     def preview_cues_from_editor(self):
@@ -7149,9 +7158,7 @@ class MainWindow(QMainWindow):
         cue_start = float(second or 0.0)
         cue_end = cue_start
 
-        subtitle_visible = self.active_subtitle_visible()
-        if subtitle_visible:
-            text, cue_start, cue_end = self.preview_subtitle_state_at(second)
+        subtitle_visible, text, cue_start, cue_end = self.active_subtitle_preview_state(second)
 
         self.live_overlay.set_subtitle_state(
             subtitle_visible,

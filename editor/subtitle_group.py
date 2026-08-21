@@ -47,3 +47,15 @@ class SubtitleGroup:
 def subtitle_group_is_visible(enabled: bool, group: SubtitleGroup | None) -> bool:
     """Professional group visibility is authoritative; legacy track state is irrelevant."""
     return bool(enabled and group is not None and group.visible)
+
+
+def active_subtitle_render_state(enabled: bool, group: SubtitleGroup | None, cues, playhead: float):
+    """Selection-free subtitle state for the active sequence preview."""
+    if not subtitle_group_is_visible(enabled, group):
+        return False, "", float(playhead), float(playhead)
+    second = float(playhead or 0.0)
+    for cue in cues or []:
+        start, end, text = cue[:3]
+        if float(start) <= second < float(end):
+            return True, str(text), float(start), float(end)
+    return True, "", second, second
