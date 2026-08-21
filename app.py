@@ -2123,8 +2123,9 @@ class MainWindow(QMainWindow):
             self.editor_document.commands.stack = self._sequence_undo_stacks.setdefault(sequence.id, QUndoStack(self))
             self.editor_refresh_all()
             if self.editor_clips:
-                self.editor_clip_selected(0, seek=False); self.editor_seek_clip(0, float(self.editor_clips[0].get("source_start", 0)), autoplay=False)
-                self.preview_pending_position = max(0, int(sequence.playhead * 1000))
+                clip_index, source_second, _clip_start = editor_engine.locate_time(self.editor_clips, sequence.playhead)
+                self.editor_clip_selected(clip_index, seek=False); self.editor_seek_clip(clip_index, source_second, autoplay=False)
+                self.editor_document.set_playhead(sequence.playhead); self.editor_timeline.set_playhead(sequence.playhead)
             else: self.clear_active_timeline_preview()
             self.refresh_live_audio_sources(); self.update_preview_subtitle(sequence.playhead); self.update_live_overlay_state()
         finally:
