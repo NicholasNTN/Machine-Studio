@@ -274,6 +274,28 @@ def inspect_audio_signal(path: str, log_file=None) -> dict:
     return result
 
 
+def verify_narration_graph(path: str, volume: float, log_file=None) -> dict:
+    """Encode the exact narration normalization chain alone, then measure it."""
+    temp = tempfile.NamedTemporaryFile(suffix=".m4a", delete=False)
+    temp_path = temp.name
+    temp.close()
+    try:
+        ffmpeg = find_binary("ffmpeg")
+        filters = normalized_audio_filters(volume)
+        if log_file: append_render_log(log_file, "\n[STAGE]\nnarration-only graph proof")
+        run([
+            ffmpeg, "-y", "-i", path, "-filter_complex",
+            f"[0:a]{','.join(filters)}[aout]", "-map", "[aout]",
+            "-c:a", "aac", "-b:a", "192k", temp_path,
+        ], log_file=log_file)
+        return inspect_audio_signal(temp_path, log_file)
+    finally:
+        try:
+            Path(temp_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 _NVENC_RUNTIME_OK = None
 
 
@@ -927,11 +949,13 @@ def export_video(
 
     # Duck original/background automatically while narration is speaking.
     if base_audio_label and narration_label and options.duck_source_under_voice:
+        fc.append(f"[{narration_label}]asplit=2[asidechain][avoice]")
         fc.append(
-            f"[{base_audio_label}][{narration_label}]"
+            f"[{base_audio_label}][asidechain]"
             "sidechaincompress=threshold=0.025:ratio=8:attack=20:release=350[aducked]"
         )
         base_audio_label = "aducked"
+        narration_label = "avoice"
 
     mix_labels = [x for x in [base_audio_label, narration_label, music_label] if x]
     audio_label, mix_filter = audio_mix_filter(mix_labels)

@@ -68,8 +68,9 @@ from core.file_dialog_history import FileDialogHistory
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 from core.media_library import migrate_global_media_library
-from core.sequence_context import active_editor_source, active_narration_path, find_origin_sequence, sequence_narration_path
+from core.sequence_context import active_editor_source, find_origin_sequence, sequence_narration_path
 from core.render_snapshot import build_render_snapshot
+from core.narration_state import begin_narration_generation, finish_narration_generation, resolve_export_narration
 
 
 APP_NAME = "Machine Studio"
@@ -2162,6 +2163,9 @@ class MainWindow(QMainWindow):
         self.narration_path = narration
         state.update({"preview_cues": list(self.preview_cues), "subtitle_editor_text": self.sub_editor.toPlainText(),
                       "subtitle_path": self.sub_path.text().strip(), "narration_path": narration})
+        for key in ("narration_source_path", "narration_synced_path", "narration_revision", "narration_synced_revision"):
+            if key in sequence.state:
+                state[key] = deepcopy(sequence.state[key])
         sequence.state = deepcopy(state); sequence.ai_project = self._project_payload()
         sequence.playhead = self.editor_current_time(); sequence.dirty = bool(self.editor_clips or self.editor_layers or self.preview_cues or self.narration_path)
 
@@ -7009,6 +7013,10 @@ class MainWindow(QMainWindow):
             manifest_path = result["manifest_path"]
             manifest = result["manifest"]
 
+            sequence = find_origin_sequence(self.sequence_manager.sequences, origin_sequence_id)
+            if sequence is not None:
+                sequence.state = finish_narration_generation(sequence.state, path)
+
             self.narration_path = path
             self.voice_file.setText(path)
             self.project.narration_path = path
@@ -7072,6 +7080,9 @@ class MainWindow(QMainWindow):
             self.schedule_processed_preview()
 
         previous_narration = self.voice_file.text().strip() or self.narration_path
+        origin_sequence = find_origin_sequence(self.sequence_manager.sequences, origin_sequence_id)
+        if origin_sequence is not None:
+            origin_sequence.state = begin_narration_generation(origin_sequence.state)
         self.prepare_narration_regeneration(getattr(self, "active_sequence_name", "Timeline 1"))
         self.run_worker(
             f"{selected_engine} đang tạo voice theo từng timeline...",
@@ -8189,17 +8200,19 @@ class MainWindow(QMainWindow):
             self.narration_player.source().toLocalFile()
             if self.narration_player.source().isLocalFile() else ""
         )
-        sequence_path_before_capture = sequence_narration_path(
-            self.sequence_manager.sequences, export_sequence_id
-        )
-        active_voice_path = active_narration_path(
-            self.voice_file.text(), sequence_path_before_capture, preview_narration_path
-        )
+        active_sequence = find_origin_sequence(self.sequence_manager.sequences, export_sequence_id)
+        sequence_state_before_capture = active_sequence.state if active_sequence is not None else {}
+        sequence_path_before_capture = sequence_narration_path(self.sequence_manager.sequences, export_sequence_id)
+        active_voice_path = resolve_export_narration(sequence_state_before_capture, preview_narration_path)
         if active_voice_path:
             self.narration_path = active_voice_path
             if not self.voice_file.text().strip():
                 self.voice_file.setText(active_voice_path)
+            if active_sequence is not None:
+                active_sequence.state["narration_path"] = active_voice_path
+                active_sequence.state["narration_source_path"] = active_voice_path
         self.capture_active_sequence()
+        sequence_path_after_capture = sequence_narration_path(self.sequence_manager.sequences, export_sequence_id)
         snapshot = build_render_snapshot(self.sequence_manager.sequences, export_sequence_id)
         has_editor_timeline = bool(snapshot.output.get("editor_use_timeline") and snapshot.clips)
         source_queue = tuple(self.queue)
@@ -8261,12 +8274,22 @@ class MainWindow(QMainWindow):
 
         export_ffmpeg_log = ROOT / "logs" / "export_ffmpeg.log"
         export_error_log = ROOT / "logs" / "export_error.log"
+        voice_debug_log = ROOT / "logs" / "voice_export_debug.log"
         export_sequence = find_origin_sequence(self.sequence_manager.sequences, export_sequence_id)
         export_sequence_name = export_sequence.name if export_sequence is not None else ""
 
         def job(progress, log):
             outputs = []
             narration_signal = None
+            voice_candidates = {
+                "preview": preview_narration_path,
+                "sequence": sequence_path_after_capture,
+                "sequence_synced": str(sequence_state_before_capture.get("narration_synced_path", "") or ""),
+                "snapshot": str(snapshot.audio.get("narration_path", "") or ""),
+                "export_options": str(options.narration_path or ""),
+                "ffmpeg_input": str(options.narration_path or "") if Path(str(options.narration_path or "")).is_file() else "",
+            }
+            voice_metrics = {}
 
             def begin_attempt(input_value, output_value):
                 ffm.begin_export_log(
@@ -8284,17 +8307,50 @@ class MainWindow(QMainWindow):
                     ffm.append_render_log(export_ffmpeg_log, "\n".join([
                         "[RENDER SNAPSHOT AUDIO]", f"sequence_id={snapshot.sequence_id}",
                         f"preview_narration_path={preview_narration_path}",
-                        f"sequence_narration_path={sequence_path_before_capture}",
+                        f"sequence_narration_path={sequence_path_after_capture}",
                         "snapshot_narration_path=", "exists=False", "size=0", "duration=0",
                         "mean_volume=None", "max_volume=None", "narration_enabled=False",
                         f"narration_volume={snapshot.audio.get('narration_volume', 0)}",
                     ]))
 
+            def audit_voice_candidates():
+                if voice_metrics:
+                    return
+                ffm.append_render_log(voice_debug_log, "\n" + "=" * 50)
+                ffm.append_render_log(voice_debug_log, "\n".join([
+                    "[VOICE PATH PARITY]", f"timestamp={datetime.datetime.now().astimezone().isoformat()}",
+                    f"sequence_id={snapshot.sequence_id}", f"sequence_name={snapshot.sequence_name}",
+                    f"preview_player_source={voice_candidates['preview']}",
+                    f"sequence_previous_narration_path={sequence_path_before_capture}",
+                    f"sequence_narration_path={voice_candidates['sequence']}",
+                    f"sequence_narration_synced_path={voice_candidates['sequence_synced']}",
+                    f"snapshot_narration_path={voice_candidates['snapshot']}",
+                    f"export_options_narration_path={voice_candidates['export_options']}",
+                    f"ffmpeg_narration_input={voice_candidates['ffmpeg_input']}",
+                ]))
+                measured = {}
+                for role, path in voice_candidates.items():
+                    key = str(Path(path)) if path else ""
+                    if key not in measured:
+                        measured[key] = ffm.inspect_audio_signal(path, voice_debug_log) if path else {
+                            "path": "", "exists": False, "size": 0, "duration": 0,
+                            "mean_volume": None, "max_volume": None, "audible": False,
+                        }
+                    voice_metrics[role] = measured[key]
+                    item = voice_metrics[role]
+                    ffm.append_render_log(voice_debug_log, "\n".join([
+                        "[VOICE FILE]", f"role={role}", f"path={path}",
+                        f"exists={item['exists']}", f"size={item.get('size', 0)}",
+                        f"duration={item['duration']}", f"mean_volume={item['mean_volume']}",
+                        f"max_volume={item['max_volume']}", f"audible={item['audible']}",
+                    ]))
+
             def verify_narration_source():
                 nonlocal narration_signal
+                audit_voice_candidates()
                 if not options.narration_path or narration_signal is not None:
                     return
-                narration_signal = ffm.inspect_audio_signal(options.narration_path, export_ffmpeg_log)
+                narration_signal = voice_metrics["export_options"]
                 ffm.append_render_log(export_ffmpeg_log, "\n".join([
                     "[VOICE SOURCE]", f"path={narration_signal['path']}",
                     f"exists={narration_signal['exists']}", f"size={narration_signal['size']}",
@@ -8305,7 +8361,7 @@ class MainWindow(QMainWindow):
                 ffm.append_render_log(export_ffmpeg_log, "\n".join([
                     "[RENDER SNAPSHOT AUDIO]", f"sequence_id={snapshot.sequence_id}",
                     f"preview_narration_path={preview_narration_path}",
-                    f"sequence_narration_path={sequence_path_before_capture}",
+                    f"sequence_narration_path={sequence_path_after_capture}",
                     f"snapshot_narration_path={snapshot.audio.get('narration_path', '')}",
                     f"exists={narration_signal['exists']}", f"size={narration_signal['size']}",
                     f"duration={narration_signal['duration']}", f"mean_volume={narration_signal['mean_volume']}",
@@ -8315,8 +8371,22 @@ class MainWindow(QMainWindow):
                 ]))
                 if not narration_signal["audible"]:
                     raise RuntimeError(
-                        "Timeline hiện tại có Voice nhưng nguồn narration bị im lặng hoặc không hợp lệ. "
-                        "Hãy tạo lại Voice và thử xuất lại."
+                        "Voice của Timeline hiện tại chưa được đưa vào Export đúng cách. "
+                        "Xem logs/voice_export_debug.log."
+                    )
+                graph_signal = ffm.verify_narration_graph(
+                    options.narration_path, options.narration_volume, voice_debug_log
+                )
+                ffm.append_render_log(voice_debug_log, "\n".join([
+                    "[VOICE GRAPH PROOF]", f"source={options.narration_path}",
+                    f"volume={options.narration_volume}", f"duration={graph_signal['duration']}",
+                    f"mean_volume={graph_signal['mean_volume']}", f"max_volume={graph_signal['max_volume']}",
+                    f"audible={graph_signal['audible']}",
+                ]))
+                if not graph_signal["audible"]:
+                    raise RuntimeError(
+                        "Voice của Timeline hiện tại chưa được đưa vào Export đúng cách. "
+                        "Xem logs/voice_export_debug.log."
                     )
 
             def record_failure(exc, output_value):
@@ -8342,10 +8412,16 @@ class MainWindow(QMainWindow):
                     f"output_has_audio={result['has_audio']}", f"output_audio_duration={result['duration']}",
                     f"output_mean_volume={result['mean_volume']}", f"output_max_volume={result['max_volume']}",
                 ]))
+                ffm.append_render_log(voice_debug_log, "\n".join([
+                    "[FINAL AUDIO]", f"sequence_id={export_sequence_id}",
+                    f"narration_expected={bool(options.narration_path)}",
+                    f"audio_stream_exists={result['has_audio']}",
+                    f"mean_volume={result['mean_volume']}", f"max_volume={result['max_volume']}",
+                ]))
                 if options.narration_path and not result["has_audio"]:
-                    raise RuntimeError("Xuất video hoàn tất nhưng không có audio narration.")
+                    raise RuntimeError("Voice của Timeline hiện tại chưa được đưa vào Export đúng cách. Xem logs/voice_export_debug.log.")
                 if options.narration_path and result["max_volume"] is not None and result["max_volume"] < -70:
-                    raise RuntimeError("Xuất video hoàn tất nhưng audio gần như im lặng.")
+                    raise RuntimeError("Voice của Timeline hiện tại chưa được đưa vào Export đúng cách. Xem logs/voice_export_debug.log.")
 
             def next_target(source_path):
                 stem = Path(source_path).stem

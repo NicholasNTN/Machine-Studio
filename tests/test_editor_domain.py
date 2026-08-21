@@ -25,6 +25,7 @@ from core.sequence_context import active_editor_source, active_narration_path, f
 from core.sequence_context import sequence_narration_path
 from core.file_dialog_history import FileDialogHistory
 from core.render_snapshot import build_render_snapshot, snapshot_resolution
+from core.narration_state import begin_narration_generation, finish_narration_generation, resolve_export_narration
 from editor.text_style import TextStyle
 from editor.blur_zone import normalize_blur_zones
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -36,6 +37,44 @@ from core.models import AIProject
 
 
 class EditorDomainTests(unittest.TestCase):
+    def test_preview_narration_is_export_truth_for_active_sequence(self):
+        state = {"narration_path": "legacy.wav", "narration_source_path": "latest.wav",
+                 "narration_synced_path": "stale.wav", "narration_revision": 2, "narration_synced_revision": 1}
+        self.assertEqual(resolve_export_narration(state, "preview.wav"), "preview.wav")
+        self.assertEqual(resolve_export_narration(state), "latest.wav")
+        self.assertEqual(resolve_export_narration({}, ""), "")
+
+    def test_tts_regeneration_invalidates_then_publishes_synced_revision(self):
+        stale = begin_narration_generation({"narration_revision": 4, "narration_synced_revision": 4,
+                                            "narration_synced_path": "old.m4a"})
+        self.assertEqual(stale["narration_revision"], 5)
+        self.assertLess(stale["narration_synced_revision"], stale["narration_revision"])
+        completed = finish_narration_generation(stale, "new.m4a")
+        self.assertEqual(completed["narration_source_path"], "new.m4a")
+        self.assertEqual(completed["narration_synced_path"], "new.m4a")
+        self.assertEqual(completed["narration_synced_revision"], completed["narration_revision"])
+
+    def test_final_mix_splits_narration_for_ducking_and_audible_mix(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); video = root / "video.mp4"; voice = root / "voice.wav"; output = root / "out.mp4"
+            video.write_bytes(b"video"); voice.write_bytes(b"voice")
+            commands = []
+
+            def fake_run(cmd, **_kwargs):
+                commands.append(cmd); output.write_bytes(b"x" * 2048); return ""
+
+            info = {"duration": 2.0, "has_audio": True, "width": 640, "height": 360, "normalized_path": str(video)}
+            options = ffmpeg_engine.ExportOptions(narration_path=str(voice), source_audio_mode="Giữ âm gốc")
+            with patch.object(ffmpeg_engine, "probe", return_value=info), \
+                 patch.object(ffmpeg_engine, "find_binary", return_value="ffmpeg"), \
+                 patch.object(ffmpeg_engine, "choose_video_encoder", return_value=["-c:v", "libx264"]), \
+                 patch.object(ffmpeg_engine, "run", side_effect=fake_run):
+                ffmpeg_engine.export_video(str(video), str(output), options)
+            graph = commands[-1][commands[-1].index("-filter_complex") + 1]
+        self.assertIn("[anar]asplit=2[asidechain][avoice]", graph)
+        self.assertIn("[abase][asidechain]sidechaincompress", graph)
+        self.assertIn("[aducked][avoice]amix", graph)
+
     def test_render_snapshot_captures_complete_sequence_state(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); video = root / "video.mp4"; voice = root / "voice.wav"; logo = root / "logo.png"; image = root / "sticker.png"
