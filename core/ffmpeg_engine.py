@@ -512,6 +512,20 @@ def export_video(
 
     if target:
         w, h = target
+        transform = dict(getattr(options, "video_transform", {}) or {})
+        transform_fit = str(transform.get("fit_mode", options.fit_mode)).lower()
+        fit_rule = "increase" if transform_fit == "fill" else "decrease"
+        sx = max(0.01, float(transform.get("scale_x", 100)) / 100.0); sy = max(0.01, float(transform.get("scale_y", 100)) / 100.0)
+        foreground = [f"scale={w}:{h}:force_original_aspect_ratio={fit_rule}", f"scale=trunc(iw*{sx}/2)*2:trunc(ih*{sy}/2)*2"]
+        if transform.get("flip_horizontal"): foreground.append("hflip")
+        if transform.get("flip_vertical"): foreground.append("vflip")
+        rotation = float(transform.get("rotation", 0) or 0)
+        if abs(rotation) > 0.001: foreground.append(f"rotate={rotation}*PI/180:ow=rotw(iw):oh=roth(ih):c=none")
+        foreground += ["format=rgba", f"colorchannelmixer=aa={max(0.0, min(1.0, float(transform.get('opacity', 100)) / 100.0)):.4f}"]
+        fg_chain = ",".join(foreground)
+        position_x = float(transform.get("position_x", 50) or 50) / 100.0
+        position_y = float(transform.get("position_y", 50) or 50) / 100.0
+        overlay_xy = f"x='(W-w)*{position_x:.6f}':y='(H-h)*{position_y:.6f}'"
         background_mode = str(getattr(options, "canvas_background_mode", "none") or "none")
         if background_mode == "blur":
             blur = max(1, min(80, int(getattr(options, "canvas_background_blur", 24))))
@@ -520,8 +534,8 @@ def export_video(
             fc += [
                 f"[{current}]split=2[vbg0][vfg0]",
                 f"[vbg0]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={blur}:3,eq=brightness={brightness:.3f},format=rgba,colorchannelmixer=aa={opacity:.3f}[vbg]",
-                f"[vfg0]scale={w}:{h}:force_original_aspect_ratio=decrease[vfg]",
-                f"[vbg][vfg]overlay=(W-w)/2:(H-h)/2[vfit]",
+                f"[vfg0]{fg_chain}[vfg]",
+                f"[vbg][vfg]overlay={overlay_xy}[vfit]",
             ]
             current = "vfit"
         elif background_mode == "image" and canvas_background_idx is not None:
@@ -530,18 +544,11 @@ def export_video(
             elif image_fit == "contain": bg_chain = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
             else: bg_chain = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
             opacity = max(0.0, min(1.0, float(getattr(options, "canvas_background_opacity", 100)) / 100.0))
-            fc += [f"[{canvas_background_idx}:v]{bg_chain},format=rgba,colorchannelmixer=aa={opacity:.3f}[vbg]", f"[{current}]scale={w}:{h}:force_original_aspect_ratio=decrease[vfg]", f"[vbg][vfg]overlay=(W-w)/2:(H-h)/2[vfit]"]
+            fc += [f"[{canvas_background_idx}:v]{bg_chain},format=rgba,colorchannelmixer=aa={opacity:.3f}[vbg]", f"[{current}]{fg_chain}[vfg]", f"[vbg][vfg]overlay={overlay_xy}[vfit]"]
             current = "vfit"
         else:
-            if str(options.fit_mode).lower() == "fill":
-                chain = (
-                    f"scale={w}:{h}:force_original_aspect_ratio=increase,"
-                    f"crop={w}:{h}"
-                )
-            else:
-                color = str(getattr(options, "canvas_background_color", "#000000") or "#000000").replace("#", "0x")
-                chain = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:{color}"
-            fc.append(f"[{current}]{chain}[vfit]")
+            color = str(getattr(options, "canvas_background_color", "#000000") or "#000000").replace("#", "0x")
+            fc += [f"color=c={color}:s={w}x{h}:r=30[canvas]", f"[{current}]{fg_chain}[vfg]", f"[canvas][vfg]overlay={overlay_xy}:shortest=1[vfit]"]
             current = "vfit"
 
     effects = []

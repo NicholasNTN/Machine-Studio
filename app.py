@@ -53,6 +53,7 @@ from services.thumbnail_service import ThumbnailService
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle
 from editor.command_manager import TimelineSnapshotCommand
+from editor.video_transform import VideoTransform
 
 
 APP_NAME = "Machine Studio"
@@ -801,11 +802,24 @@ class MainWindow(QMainWindow):
         if selection.kind == "video":
             item = next((clip for clip in self.editor_clips if clip.get("id") == selection.object_id), None)
             if item is not None:
-                item[key] = value
+                before = [dict(clip) for clip in self.editor_clips]
+                if key == "reset_transform":
+                    item["transform"] = VideoTransform().to_dict()
+                elif key in VideoTransform.__dataclass_fields__:
+                    transform = VideoTransform.from_dict(item.get("transform", {}))
+                    setattr(transform, key, value)
+                    if key == "scale_x" and transform.uniform_scale: transform.scale_y = float(value)
+                    elif key == "scale_y" and transform.uniform_scale: transform.scale_x = float(value)
+                    item["transform"] = transform.to_dict()
+                else:
+                    item[key] = value
                 if key == "muted": item["muted"] = bool(value)
                 if key in ("volume", "muted"):
                     volume = 0.0 if item.get("muted", False) else max(0.0, min(1.0, float(item.get("volume", 100)) / 100.0))
                     self.audio_output.setVolume(volume)
+                if key == "reset_transform" or key in VideoTransform.__dataclass_fields__:
+                    self.context_inspector.load_properties("video", {**item, **item.get("transform", {})})
+                    self._push_timeline_undo("Video transform", before)
         elif selection.kind in ("text", "image", "logo"):
             layer = next((layer for layer in self.editor_layers if layer.get("id") == selection.object_id), None)
             if layer is not None:
@@ -1327,6 +1341,7 @@ class MainWindow(QMainWindow):
         self.live_overlay.editorLayerGeometryChanged.connect(
             self.on_live_editor_layer_geometry_changed
         )
+        self.live_overlay.videoTransformChanged.connect(self.on_live_video_transform_changed)
         self.live_overlay.interactionFinished.connect(self.on_live_overlay_interaction_finished)
         self.live_overlay.selectionChanged.connect(self.on_live_overlay_selection_changed)
         self.video_sink.videoFrameChanged.connect(self.live_overlay.set_video_frame)
@@ -2469,7 +2484,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "settings_panel"): self.settings_panel.set_page("video_clip")
         self.editor_document.selection.select("video", str(clip.get("id", "")))
         if hasattr(self, "context_inspector"):
-            self.context_inspector.load_properties("video", clip)
+            self.context_inspector.load_properties("video", {**clip, **VideoTransform.from_dict(clip.get("transform", {})).to_dict()})
+        self.live_overlay.selected_type = "video"
+        self.live_overlay.selected_index = index
 
         self.editor_clip_name.setText(
             f"{index + 1}. {clip.get('name', Path(clip.get('path','')).name)}"
@@ -5480,7 +5497,9 @@ class MainWindow(QMainWindow):
         try:
             canvas_w, canvas_h = self.project_canvas_dimensions()
             self.live_overlay.set_output_canvas(canvas_w, canvas_h)
-            self.live_overlay.set_video_fit_mode("fit")
+            clip = self.editor_clips[self.editor_selected_clip] if 0 <= self.editor_selected_clip < len(self.editor_clips) else {}
+            transform = VideoTransform.from_dict(clip.get("transform", {}))
+            self.live_overlay.set_video_transform(transform.to_dict())
             self.live_overlay.set_canvas_background(self.current_canvas_background())
 
             if self.preview_is_processed:
@@ -5592,7 +5611,19 @@ class MainWindow(QMainWindow):
         self.overlay_pos.blockSignals(True); self.overlay_pos.setCurrentText("Custom"); self.overlay_pos.blockSignals(False)
         self.update_live_overlay_state()
 
+    def on_live_video_transform_changed(self, transform):
+        if not (0 <= self.editor_selected_clip < len(self.editor_clips)): return
+        if not hasattr(self, "_video_drag_before") or self._video_drag_before is None:
+            self._video_drag_before = [dict(clip) for clip in self.editor_clips]
+        self.editor_clips[self.editor_selected_clip]["transform"] = VideoTransform.from_dict(transform).to_dict()
+        self.context_inspector.load_properties("video", {**self.editor_clips[self.editor_selected_clip], **transform})
+        self.update_live_overlay_state()
+
     def on_live_overlay_interaction_finished(self):
+        if hasattr(self, "_video_drag_before") and self._video_drag_before is not None:
+            before = self._video_drag_before; self._video_drag_before = None
+            self._push_timeline_undo("Video transform", before)
+            self.schedule_autosave(); return
         if (
             hasattr(self, "live_overlay")
             and self.live_overlay.selected_type == "editor_layer"
@@ -7322,6 +7353,7 @@ class MainWindow(QMainWindow):
             canvas_background_opacity=canvas_background["opacity"],
             canvas_background_blur=canvas_background["blur_strength"],
             canvas_background_brightness=canvas_background["brightness"],
+            video_transform=(VideoTransform.from_dict(self.editor_clips[self.editor_selected_clip].get("transform", {})).to_dict() if 0 <= self.editor_selected_clip < len(self.editor_clips) else VideoTransform().to_dict()),
             codec=self.codec.currentText(),
             encoder=self.encoder.currentText(),
 
@@ -7479,6 +7511,9 @@ class MainWindow(QMainWindow):
                     process_holder=self.process_holder,
                 )
                 progress(1, 2)
+
+                # Per-clip transforms were already baked by render_timeline.
+                options.video_transform = VideoTransform().to_dict()
 
                 ffm.export_video(
                     str(timeline_source),

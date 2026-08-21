@@ -107,6 +107,7 @@ class ExportOptions:
     canvas_background_opacity: int = 100
     canvas_background_blur: int = 24
     canvas_background_brightness: int = -15
+    video_transform: dict = field(default_factory=dict)
     codec: str = "H.264"
     encoder: str = "Auto (GPU)"
 

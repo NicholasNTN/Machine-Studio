@@ -10,6 +10,7 @@ import tempfile
 import time
 
 from . import ffmpeg_engine as ffm
+from editor.video_transform import VideoTransform
 
 
 class EditorError(RuntimeError):
@@ -43,6 +44,7 @@ def normalize_clip(clip: dict) -> dict:
     c["muted"] = bool(c.get("muted", False))
     c["volume"] = max(0.0, min(200.0, float(c.get("volume", 100.0) or 0.0)))
     c["id"] = str(c.get("id", "") or _clip_id(path))
+    c["transform"] = VideoTransform.from_dict(c.get("transform", {})).to_dict()
     return c
 
 
@@ -68,6 +70,7 @@ def make_clip(path: str) -> dict:
         "locked": False,
         "muted": False,
         "volume": 100.0,
+        "transform": VideoTransform().to_dict(),
     }
 
 
@@ -216,15 +219,24 @@ def render_timeline(
         end = float(clip["source_end"])
         dur = max(0.05, end - start)
 
+        transform = VideoTransform.from_dict(clip.get("transform", {}))
+        base_mode = "increase" if transform.fit_mode == "fill" else "decrease"
+        sx = max(0.01, transform.scale_x / 100.0); sy = max(0.01, transform.scale_y / 100.0)
+        x = f"({out_w}-overlay_w)*{transform.position_x / 100.0:.6f}"
+        y = f"({out_h}-overlay_h)*{transform.position_y / 100.0:.6f}"
+        transform_filters = [f"scale={out_w}:{out_h}:force_original_aspect_ratio={base_mode}", f"scale=trunc(iw*{sx}/2)*2:trunc(ih*{sy}/2)*2"]
+        if transform.flip_horizontal: transform_filters.append("hflip")
+        if transform.flip_vertical: transform_filters.append("vflip")
+        if abs(transform.rotation) > 0.001: transform_filters.append(f"rotate={transform.rotation}*PI/180:ow=rotw(iw):oh=roth(ih):c=none")
+        transform_filters += ["format=rgba", f"colorchannelmixer=aa={max(0.0, min(1.0, transform.opacity / 100.0)):.4f}"]
         filters.append(
             f"[{i}:v]"
             f"trim=start={start:.6f}:end={end:.6f},"
             "setpts=PTS-STARTPTS,"
-            f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,"
-            f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:black,"
-            "setsar=1,fps=30,format=yuv420p"
-            f"[v{i}]"
+            f"{','.join(transform_filters)},setsar=1,fps=30[vt{i}]"
         )
+        filters.append(f"color=c=black:s={out_w}x{out_h}:r=30:d={dur:.6f}[vc{i}]")
+        filters.append(f"[vc{i}][vt{i}]overlay=x='{x}':y='{y}':shortest=1,format=yuv420p[v{i}]")
 
         if info.get("has_audio") and not clip.get("muted", False):
             filters.append(

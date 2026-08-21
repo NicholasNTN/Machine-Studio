@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox, QFormLayout, QFrame, QLabel, QLineEdit, QScrollArea, QSpinBox, QStackedWidget, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QStackedWidget, QTextEdit, QVBoxLayout, QWidget
 
 
 class InspectorPanel(QFrame):
@@ -58,6 +58,22 @@ class InspectorPanel(QFrame):
             for args in (("x", "Position X", -200, 200, 50), ("y", "Position Y", -200, 200, 50), ("scale", "Scale", 1, 500, 100), ("rotation", "Rotation", -360, 360, 0), ("opacity", "Opacity", 0, 100, 100)): self._double(form, kind, *args)
         if kind in ("video", "audio"):
             self._double(form, kind, "volume", "Volume", 0, 200, 100); self._check(form, kind, "muted", "Mute")
+        if kind == "video":
+            mode = QComboBox(); mode.addItems(["Fit", "Fill"]); self._bind(kind, "fit_mode", mode, "currentTextChanged", lambda w: w.currentText().lower()); form.addRow("Video mode", mode)
+            self._check(form, kind, "uniform_scale", "Uniform scale")
+            self._double(form, kind, "scale_x", "Scale X", 1, 500, 100); self._double(form, kind, "scale_y", "Scale Y", 1, 500, 100)
+            self._double(form, kind, "position_x", "Position X", -100, 200, 50); self._double(form, kind, "position_y", "Position Y", -100, 200, 50)
+            self._double(form, kind, "rotation", "Rotation", -360, 360, 0); self._double(form, kind, "opacity", "Opacity", 0, 100, 100)
+            self._check(form, kind, "flip_horizontal", "Flip horizontal"); self._check(form, kind, "flip_vertical", "Flip vertical")
+            horizontal = QHBoxLayout()
+            for label, value in (("Left", 0), ("Center", 50), ("Right", 100)):
+                button = QPushButton(label); button.clicked.connect(lambda _=False, v=value: self.propertyChanged.emit("position_x", v)); horizontal.addWidget(button)
+            form.addRow("Align X", horizontal)
+            vertical = QHBoxLayout()
+            for label, value in (("Top", 0), ("Center", 50), ("Bottom", 100)):
+                button = QPushButton(label); button.clicked.connect(lambda _=False, v=value: self.propertyChanged.emit("position_y", v)); vertical.addWidget(button)
+            form.addRow("Align Y", vertical)
+            reset = QPushButton("Reset Transform"); reset.clicked.connect(lambda: self.propertyChanged.emit("reset_transform", True)); form.addRow(reset)
         if kind == "audio":
             self._double(form, kind, "fade_in", "Fade in", 0, 60, 0); self._double(form, kind, "fade_out", "Fade out", 0, 60, 0)
         if kind == "blur":

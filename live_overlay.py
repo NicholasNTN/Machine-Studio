@@ -28,6 +28,7 @@ class InteractivePreviewOverlay(QWidget):
     logoGeometryChanged = Signal(float, float, float)
     overlayTextGeometryChanged = Signal(float, float, int)
     editorLayerGeometryChanged = Signal(int, dict)
+    videoTransformChanged = Signal(dict)
     interactionFinished = Signal()
     selectionChanged = Signal(str, int)
 
@@ -42,6 +43,7 @@ class InteractivePreviewOverlay(QWidget):
         self._frame_image = QImage()
         self._source_crop = QRectF()
         self.video_fit_mode = "fit"
+        self.video_transform = {"position_x": 50.0, "position_y": 50.0, "scale_x": 100.0, "scale_y": 100.0, "rotation": 0.0, "opacity": 100.0, "fit_mode": "fit"}
         self.canvas_background = {"mode": "none", "color": "#000000"}
         self._background_pixmap = QPixmap()
         self._background_loaded_path = ""
@@ -80,6 +82,7 @@ class InteractivePreviewOverlay(QWidget):
         self.editor_time = 0.0
         self._editor_pixmaps: dict[str, QPixmap] = {}
         self.start_editor_layer = None
+        self.start_video_transform = None
 
         self.output_aspect = 9 / 16
         self.output_width = 1080
@@ -175,6 +178,11 @@ class InteractivePreviewOverlay(QWidget):
 
     def set_video_fit_mode(self, mode):
         self.video_fit_mode = "fill" if str(mode).lower() == "fill" else "fit"
+        self.update()
+
+    def set_video_transform(self, transform):
+        self.video_transform = dict(transform or {})
+        self.video_fit_mode = "fill" if str(self.video_transform.get("fit_mode", "fit")).lower() == "fill" else "fit"
         self.update()
 
     def set_canvas_background(self, state):
@@ -339,7 +347,11 @@ class InteractivePreviewOverlay(QWidget):
         if self._frame_image.isNull():
             return canvas
         rect = calculate_media_rect(self._frame_image.width(), self._frame_image.height(), self.output_width, self.output_height, self.video_fit_mode)
-        return QRectF(canvas.left() + canvas.width() * rect.x / self.output_width, canvas.top() + canvas.height() * rect.y / self.output_height, canvas.width() * rect.width / self.output_width, canvas.height() * rect.height / self.output_height)
+        sx = max(0.01, float(self.video_transform.get("scale_x", 100)) / 100.0); sy = max(0.01, float(self.video_transform.get("scale_y", 100)) / 100.0)
+        width = canvas.width() * rect.width / self.output_width * sx; height = canvas.height() * rect.height / self.output_height * sy
+        cx = canvas.left() + (canvas.width() - width) * float(self.video_transform.get("position_x", 50)) / 100.0 + width / 2.0
+        cy = canvas.top() + (canvas.height() - height) * float(self.video_transform.get("position_y", 50)) / 100.0 + height / 2.0
+        return QRectF(cx - width / 2, cy - height / 2, width, height)
 
     def pct_rect(self, zone: dict) -> QRectF:
         vr = self.video_rect()
@@ -460,7 +472,12 @@ class InteractivePreviewOverlay(QWidget):
         vr = self.source_display_rect()
         src = self.source_crop_rect()
         self._source_crop = src
-        p.drawImage(vr, self._frame_image, src)
+        p.save(); p.setClipRect(canvas)
+        p.setOpacity(max(0.0, min(1.0, float(self.video_transform.get("opacity", 100)) / 100.0)))
+        center = vr.center(); p.translate(center); p.rotate(float(self.video_transform.get("rotation", 0))); p.translate(-center)
+        if self.video_transform.get("flip_horizontal"): p.translate(vr.center().x() * 2, 0); p.scale(-1, 1)
+        if self.video_transform.get("flip_vertical"): p.translate(0, vr.center().y() * 2); p.scale(1, -1)
+        p.drawImage(vr, self._frame_image, src); p.restore()
 
     def _paint_realtime_blur(self, p: QPainter, zone: dict, dst: QRectF):
         if self.blur_style == "Đen mờ":
@@ -629,6 +646,10 @@ class InteractivePreviewOverlay(QWidget):
             # VIDEO AND EFFECTS ARE ON THE SAME SURFACE.
             self._paint_video(p)
             vr = self.video_rect()
+            if self.selected_type == "video" and not self._frame_image.isNull():
+                source_rect = self.source_display_rect()
+                p.setBrush(Qt.NoBrush); p.setPen(QPen(QColor("#45A3FF"), 2, Qt.DashLine)); p.drawRect(source_rect)
+                p.setBrush(QColor("#45A3FF")); p.setPen(Qt.NoPen); p.drawRect(self.handle_rect(source_rect))
 
             # Real-time blur/masks.
             if self.blur_enabled:
@@ -958,6 +979,13 @@ class InteractivePreviewOverlay(QWidget):
                 return
             self.press_pos = QPointF(pos)
 
+            if self.selected_type == "video" and not self._frame_image.isNull():
+                rect = self.source_display_rect()
+                if self.handle_rect(rect).contains(pos):
+                    self.drag_mode = "resize_video"; self.start_video_transform = dict(self.video_transform); return
+                if rect.contains(pos):
+                    self.drag_mode = "move_video"; self.start_video_transform = dict(self.video_transform); return
+
             if (
                 self.selected_type == "blur"
                 and 0 <= self.selected_index < len(self.blur_zones)
@@ -1098,6 +1126,12 @@ class InteractivePreviewOverlay(QWidget):
         except Exception:
             self.drag_mode = ""
 
+    def mouseDoubleClickEvent(self, event):
+        if self.selected_type == "video" and self.source_display_rect().contains(event.position()):
+            self.video_transform = {"position_x": 50.0, "position_y": 50.0, "scale_x": 100.0, "scale_y": 100.0, "uniform_scale": True, "rotation": 0.0, "opacity": 100.0, "fit_mode": "fit", "flip_horizontal": False, "flip_vertical": False}
+            self.videoTransformChanged.emit(dict(self.video_transform)); self.interactionFinished.emit(); self.update(); return
+        super().mouseDoubleClickEvent(event)
+
     def mouseMoveEvent(self, event):
         if not self.drag_mode:
             return
@@ -1122,6 +1156,18 @@ class InteractivePreviewOverlay(QWidget):
             dy = (
                 event.position().y() - self.press_pos.y()
             ) / vr.height() * 100
+
+            if self.drag_mode in ("move_video", "resize_video") and self.start_video_transform is not None:
+                transform = dict(self.start_video_transform)
+                if self.drag_mode == "move_video":
+                    transform["position_x"] = float(transform.get("position_x", 50)) + dx
+                    transform["position_y"] = float(transform.get("position_y", 50)) + dy
+                    transform["position_x"], transform["position_y"] = self._snap_center_xy(transform["position_x"], transform["position_y"])
+                else:
+                    amount = max(dx, dy)
+                    transform["scale_x"] = max(1.0, min(500.0, float(transform.get("scale_x", 100)) + amount * 2.0))
+                    if transform.get("uniform_scale", True): transform["scale_y"] = transform["scale_x"]
+                self.video_transform = transform; self.videoTransformChanged.emit(dict(transform)); self.update(); return
 
             if (
                 self.drag_mode in ("move_editor_layer", "resize_editor_layer")
@@ -1300,6 +1346,7 @@ class InteractivePreviewOverlay(QWidget):
             self.start_logo = None
             self.start_text = None
             self.start_editor_layer = None
+            self.start_video_transform = None
             self.snap_x_active = False
             self.snap_y_active = False
             self.update()

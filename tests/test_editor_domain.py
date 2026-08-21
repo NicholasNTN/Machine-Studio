@@ -8,6 +8,7 @@ from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
 from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle
 from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
+from editor.video_transform import VideoTransform
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -25,6 +26,10 @@ class EditorDomainTests(unittest.TestCase):
     def test_canvas_background_round_trip(self):
         state = CanvasBackground(mode="image", image_path="background.png", image_fit="cover", opacity=82)
         self.assertEqual(CanvasBackground.from_dict(state.to_dict()), state)
+
+    def test_video_transform_round_trip(self):
+        state = VideoTransform(position_x=12.5, scale_x=135, rotation=8, fit_mode="fill")
+        self.assertEqual(VideoTransform.from_dict(state.to_dict()), state)
 
     def test_non_video_content_extends_trimmed_video_duration(self):
         state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])
