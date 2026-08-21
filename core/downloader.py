@@ -14,6 +14,13 @@ class DownloadError(RuntimeError):
     pass
 
 
+def safe_output_filename(value: str) -> str:
+    """Return a portable yt-dlp/file-system safe display filename."""
+    clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "").strip()).rstrip(". ")
+    clean = re.sub(r"\s+", " ", clean)
+    return (clean or "video")[:180]
+
+
 # Ordered by priority when a copied share message contains more than one URL.
 PLATFORM_HOSTS = {
     "Douyin": (

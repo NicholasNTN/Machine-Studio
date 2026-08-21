@@ -3500,17 +3500,11 @@ class MainWindow(QMainWindow):
     def _build_download_tab(self):
         root = QVBoxLayout(self.download_tab)
 
-        box = QGroupBox(
-            "Universal Video Downloader — Douyin / Bilibili / Youku / "
-            "Xiaohongshu / TikTok / YouTube / Facebook / ..."
-        )
+        box = QGroupBox("DOWNLOAD VIDEO")
         g = QGridLayout(box)
 
         self.url = QLineEdit()
-        self.url.setPlaceholderText(
-            "Dán URL HOẶC nguyên đoạn text chia sẻ. "
-            "App tự bóc link https://... bên trong."
-        )
+        self.url.setPlaceholderText("Paste video link here...")
 
         self.dl_detected = QLabel("Chưa nhận diện link")
         self.dl_detected.setObjectName("hint")
@@ -3544,38 +3538,27 @@ class MainWindow(QMainWindow):
         choose = QPushButton("Thư mục")
         choose.clicked.connect(self.choose_download_dir)
 
-        clean_btn = QPushButton("Nhận diện link")
-        clean_btn.clicked.connect(self.preview_download_url)
+        clean_btn = QPushButton("Paste")
+        clean_btn.clicked.connect(self.paste_download_url)
 
         self.dl_update_btn = QPushButton("Cập nhật yt-dlp")
         self.dl_update_btn.clicked.connect(self.update_downloader_engine)
 
-        start = QPushButton("Tải video")
+        start = QPushButton("Download")
         start.setObjectName("success")
         start.clicked.connect(self.start_download)
 
-        g.addWidget(QLabel("URL / Share text"), 0, 0)
-        g.addWidget(self.url, 0, 1, 1, 4)
+        g.addWidget(self.url, 0, 0, 1, 3); g.addWidget(clean_btn, 0, 3); g.addWidget(start, 0, 4)
+        g.addWidget(QLabel("Save to:"), 1, 0); g.addWidget(self.dl_dir, 1, 1, 1, 3); g.addWidget(choose, 1, 4)
+        g.addWidget(self.dl_detected, 2, 0, 1, 5)
 
-        g.addWidget(QLabel("Nhận diện"), 1, 0)
-        g.addWidget(self.dl_detected, 1, 1, 1, 3)
-        g.addWidget(clean_btn, 1, 4)
-
-        g.addWidget(QLabel("Lưu tại"), 2, 0)
-        g.addWidget(self.dl_dir, 2, 1, 1, 3)
-        g.addWidget(choose, 2, 4)
-
-        g.addWidget(QLabel("Quality"), 3, 0)
-        g.addWidget(self.dl_quality, 3, 1)
-
-        g.addWidget(QLabel("Cookies"), 3, 2)
-        g.addWidget(self.cookies_browser, 3, 3)
-
-        g.addWidget(start, 3, 4)
-
-        g.addWidget(QLabel("Cookie file"), 4, 0)
-        g.addWidget(self.cookies_file, 4, 1, 1, 3)
-        g.addWidget(choose_cookie, 4, 4)
+        advanced_toggle = QPushButton("Advanced ▸"); advanced_toggle.setCheckable(True)
+        advanced = QWidget(); advanced.setVisible(False); advanced_form = QGridLayout(advanced); advanced_form.setContentsMargins(0, 0, 0, 0)
+        advanced_form.addWidget(QLabel("Quality ceiling"), 0, 0); advanced_form.addWidget(self.dl_quality, 0, 1)
+        advanced_form.addWidget(QLabel("Cookies"), 0, 2); advanced_form.addWidget(self.cookies_browser, 0, 3)
+        advanced_form.addWidget(QLabel("Cookie file"), 1, 0); advanced_form.addWidget(self.cookies_file, 1, 1, 1, 2); advanced_form.addWidget(choose_cookie, 1, 3)
+        advanced_toggle.toggled.connect(lambda checked: (advanced.setVisible(checked), advanced_toggle.setText("Advanced ▾" if checked else "Advanced ▸")))
+        g.addWidget(advanced_toggle, 3, 0); g.addWidget(advanced, 4, 0, 1, 5)
 
         engine_row = QWidget()
         er = QHBoxLayout(engine_row)
@@ -3587,7 +3570,7 @@ class MainWindow(QMainWindow):
         er.addWidget(self.dl_engine_version)
         er.addStretch(1)
         er.addWidget(self.dl_update_btn)
-        g.addWidget(engine_row, 5, 0, 1, 5)
+        advanced_form.addWidget(engine_row, 2, 0, 1, 4)
 
         note = QLabel(
             "Windows: Auto KHÔNG tự đọc Chrome/Edge/Firefox để tránh DPAPI/DB lock. "
@@ -3596,7 +3579,7 @@ class MainWindow(QMainWindow):
         )
         note.setObjectName("hint")
         note.setWordWrap(True)
-        g.addWidget(note, 6, 0, 1, 5)
+        advanced_form.addWidget(note, 3, 0, 1, 4)
 
         root.addWidget(box)
 
@@ -7919,6 +7902,11 @@ class MainWindow(QMainWindow):
         # actually be sent to yt-dlp.
         self.url.setText(cleaned)
         self.dl_detected.setText(f"✓ {platform}: {cleaned}")
+
+    def paste_download_url(self):
+        text = QApplication.clipboard().text().strip()
+        if text: self.url.setText(text)
+        self.preview_download_url()
 
     def update_downloader_engine(self):
         self.dl_log.clear()

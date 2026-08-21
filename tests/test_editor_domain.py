@@ -9,6 +9,7 @@ from editor.track import Track, TrackKind
 from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle
 from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
 from editor.video_transform import VideoTransform
+from core.downloader import safe_output_filename
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -30,6 +31,9 @@ class EditorDomainTests(unittest.TestCase):
     def test_video_transform_round_trip(self):
         state = VideoTransform(position_x=12.5, scale_x=135, rotation=8, fit_mode="fill")
         self.assertEqual(VideoTransform.from_dict(state.to_dict()), state)
+
+    def test_downloader_filename_is_windows_safe(self):
+        self.assertEqual(safe_output_filename('  bad:<video>?*.mp4. '), "bad__video___.mp4")
 
     def test_non_video_content_extends_trimmed_video_duration(self):
         state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])
