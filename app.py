@@ -2194,7 +2194,7 @@ class MainWindow(QMainWindow):
             self.duplicate_sequence(sequence_id)
         elif chosen == close: self.close_sequence(sequence_id)
         elif chosen == close_others:
-            self.capture_active_sequence(); keep = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); self.sequence_manager.sequences[:] = [keep]; self.sequence_manager.active_sequence_id = keep.id; self.refresh_sequence_tabs(); self.restore_active_sequence()
+            self.capture_active_sequence(); keep = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); self.sequence_manager.sequences[:] = [keep]; self.sequence_manager.active_sequence_id = keep.id; self.sequence_manager.renumber_auto_names(); self.refresh_sequence_tabs(); self.restore_active_sequence()
 
     def _build_basic_editor_panel(self, parent_layout):
         self.editor_panel = QGroupBox("")

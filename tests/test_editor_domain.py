@@ -261,15 +261,27 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
         self.assertEqual([item["name"] for item in restored.sequences], ["Timeline", "Timeline 2"])
 
-    def test_sequence_names_are_stable_and_use_next_available_number(self):
+    def test_sequence_auto_names_compact_without_changing_ids(self):
         manager = SequenceManager()
         self.assertEqual(manager.active.name, "Timeline")
         first = manager.create(); second = manager.create()
         self.assertEqual([item.name for item in manager.sequences], ["Timeline", "Timeline 1", "Timeline 2"])
+        second_id = second.id
         manager.close(first.id)
         third = manager.create()
-        self.assertEqual(third.name, "Timeline 3")
-        self.assertEqual([item.name for item in manager.sequences], ["Timeline", "Timeline 2", "Timeline 3"])
+        self.assertEqual(third.name, "Timeline 2")
+        self.assertEqual([item.name for item in manager.sequences], ["Timeline", "Timeline 1", "Timeline 2"])
+        self.assertEqual(second.id, second_id)
+
+    def test_custom_sequence_names_survive_auto_name_compaction(self):
+        manager = SequenceManager(); first = manager.create(); custom = manager.create()
+        manager.rename(custom.id, "Factory")
+        manager.close(first.id)
+        self.assertEqual([item.name for item in manager.sequences], ["Timeline", "Factory"])
+        self.assertEqual(custom.name_mode, "custom")
+        self.assertEqual(manager.create().name, "Timeline 1")
+        restored = SequenceManager.from_dict(manager.to_dict())
+        self.assertEqual([(item.name, item.name_mode) for item in restored.sequences], [("Timeline", "auto"), ("Factory", "custom"), ("Timeline 1", "auto")])
 
     def test_integrated_sequence_strip_replaces_fake_qtabbar(self):
         source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
