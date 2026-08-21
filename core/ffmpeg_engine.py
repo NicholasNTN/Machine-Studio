@@ -714,6 +714,9 @@ def export_video(
             f"scale={layer_width}:-1",
             "format=rgba",
         ]
+        rotation = float(layer.get("rotation", 0) or 0)
+        if abs(rotation) > 0.001:
+            filters.append(f"rotate={rotation}*PI/180:ow=rotw(iw):oh=roth(ih):c=none")
         if opacity < 0.999:
             filters.append(f"colorchannelmixer=aa={opacity:.3f}")
         fc.append(
