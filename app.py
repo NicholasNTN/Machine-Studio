@@ -1474,6 +1474,8 @@ class MainWindow(QMainWindow):
         voice_box = QGroupBox("🔑 Lồng Tiếng (TTS)")
         self.voice_settings_box = voice_box
         vg = QGridLayout(voice_box)
+        self.voice_settings_layout = vg
+        self.extra_role_voice_widgets = []
 
         self.script_ready_label = QLabel("Kịch bản AI: chưa có")
         self.script_ready_label.setObjectName("readyText")
@@ -4511,12 +4513,40 @@ class MainWindow(QMainWindow):
             self.tts_voice_b_label.setVisible(dual); self.tts_voice_b.setVisible(dual); self.tts_voice_b_try.setVisible(dual)
             self.tts_voice_a_label.setText(roles[0][1] if dual else "Giọng")
             if dual: self.tts_voice_b_label.setText(roles[1][1])
+        if hasattr(self, "voice_settings_layout"): self.rebuild_role_voice_selectors(style_meta)
 
     def current_ai_style_metadata(self):
         style_id = self.script_style.currentData() if hasattr(self, "script_style") else "factory_documentary"
         return get_style(str(style_id or "factory_documentary"))
 
     def current_ai_style_name(self): return self.current_ai_style_metadata().display_name
+
+    def rebuild_role_voice_selectors(self, style_meta=None):
+        style_meta = style_meta or self.current_ai_style_metadata()
+        for label, combo, button in self.extra_role_voice_widgets:
+            self.voice_settings_layout.removeWidget(label); self.voice_settings_layout.removeWidget(combo); self.voice_settings_layout.removeWidget(button)
+            label.deleteLater(); combo.deleteLater(); button.deleteLater()
+        self.extra_role_voice_widgets = []
+        roles = list(zip(style_meta.speaker_roles, style_meta.role_labels))
+        self.voice_selectors_by_role = {roles[0][0]: self.tts_voice}
+        dual_or_more = len(roles) > 1
+        self.tts_voice_b_label.setVisible(dual_or_more); self.tts_voice_b.setVisible(dual_or_more); self.tts_voice_b_try.setVisible(dual_or_more)
+        if dual_or_more:
+            self.tts_voice_b_label.setText(f"Voice B · {roles[1][1]}"); self.voice_selectors_by_role[roles[1][0]] = self.tts_voice_b
+        self.tts_voice_a_label.setText(f"Voice A · {roles[0][1]}" if dual_or_more else "Voice")
+        for slot, (role_id, role_label) in enumerate(roles[2:], 2):
+            label = QLabel(f"Voice {chr(65 + slot)} · {role_label}"); combo = QComboBox(); combo.setEditable(True)
+            for index in range(self.tts_voice.count()): combo.addItem(self.tts_voice.itemText(index))
+            button = QPushButton(f"Test Voice {chr(65 + slot)}"); button.clicked.connect(lambda _=False, widget=combo: self.preview_piper_voice(widget.currentText().strip()))
+            row = 11 + slot - 1; self.voice_settings_layout.addWidget(label, row, 0); self.voice_settings_layout.addWidget(combo, row, 1, 1, 2); self.voice_settings_layout.addWidget(button, row, 3)
+            self.extra_role_voice_widgets.append((label, combo, button)); self.voice_selectors_by_role[role_id] = combo
+        pending = getattr(self, "_pending_role_voice_map", {})
+        for role_id, combo in self.voice_selectors_by_role.items():
+            if pending.get(role_id): combo.setCurrentText(str(pending[role_id]))
+
+    def selected_voice_for_role(self, role):
+        widget = getattr(self, "voice_selectors_by_role", {}).get(str(role), self.tts_voice)
+        return widget.currentText().strip() or self.tts_voice.currentText().strip()
 
     def ai_fast_pipeline(self):
         video = self.ai_video_path.text().strip()
@@ -5919,6 +5949,7 @@ class MainWindow(QMainWindow):
         for index in range(self.tts_voice.count()): self.tts_voice_b.addItem(self.tts_voice.itemText(index))
         if previous_b and self.tts_voice_b.findText(previous_b) >= 0: self.tts_voice_b.setCurrentText(previous_b)
         elif self.tts_voice_b.count(): self.tts_voice_b.setCurrentIndex(min(1, self.tts_voice_b.count() - 1))
+        self.rebuild_role_voice_selectors()
 
     def _replace_tts_voice_items(self, items, preferred=""):
         self.tts_voice.blockSignals(True)
@@ -6106,8 +6137,8 @@ class MainWindow(QMainWindow):
 
         selected_engine = self.tts_engine.currentText()
         selected_voice = self.tts_voice.currentText().strip()
-        selected_voice_b = self.tts_voice_b.currentText().strip() or selected_voice
         selected_style = self.current_ai_style_metadata().id if hasattr(self, "script_style") else "factory_documentary"
+        role_voice_map = {role: combo.currentText().strip() or selected_voice for role, combo in getattr(self, "voice_selectors_by_role", {}).items()}
         speed = self.tts_speed.value()
         google_tts_key = self.tts_api_key.text().strip()
         gemini_model = self.tts_model.currentText().strip()
@@ -6206,7 +6237,7 @@ class MainWindow(QMainWindow):
             for i, scene in enumerate(script_scenes):
                 text = scene.en_voice.strip()
                 if not fallback_used:
-                    active_voice = voice_for_role(getattr(scene, "voice_role", "single"), selected_voice, selected_voice_b, selected_style)
+                    active_voice = role_voice_map.get(getattr(scene, "voice_role", "single"), selected_voice)
 
                 # Extension follows the ACTUAL engine for each scene.
                 ext = ".mp3" if "Edge" in active_engine else ".wav"
@@ -7181,6 +7212,7 @@ class MainWindow(QMainWindow):
             "narration_volume": self.narration_volume.value(),
             "music_volume": self.music_volume.value(),
             "music_file": self.music_file.text().strip(),
+            "role_voice_map": {role: combo.currentText().strip() for role, combo in getattr(self, "voice_selectors_by_role", {}).items()},
             "accompaniment_path": self.accompaniment_path,
             "vocals_path": self.vocals_path,
             "subtitle_style": self.current_subtitle_style().__dict__,
@@ -7249,6 +7281,7 @@ class MainWindow(QMainWindow):
         if not data:
             return
         self._restoring_state = True
+        self._pending_role_voice_map = dict(data.get("role_voice_map", {}) or {})
         for key, widget in {
             "resolution": self.resolution,
             "codec": self.codec,
