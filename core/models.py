@@ -46,6 +46,8 @@ class AIProject:
     processed_preview_path: str = ""
     export_state: dict = field(default_factory=dict)
     scenes: list[Scene] = field(default_factory=list)
+    active_sequence_id: str = ""
+    sequences: list[dict] = field(default_factory=list)
 
     def save(self, path: str | Path):
         Path(path).write_text(

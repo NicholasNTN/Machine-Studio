@@ -172,6 +172,16 @@ class EditorDomainTests(unittest.TestCase):
         restored = SequenceManager.from_dict(manager.to_dict())
         self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
 
+    def test_sequence_rename_duplicate_close_and_order_persist(self):
+        manager = SequenceManager(); first = manager.active; first.state = {"subtitle": "A"}
+        manager.rename(first.id, "Machines")
+        duplicate = manager.duplicate(first.id); duplicate.state["subtitle"] = "B"
+        restored = SequenceManager.from_dict(manager.to_dict())
+        self.assertEqual([s.name for s in restored.sequences], ["Machines", "Machines Copy"])
+        self.assertEqual(restored.active.state["subtitle"], "B")
+        restored.close(duplicate.id)
+        self.assertEqual(restored.active.name, "Machines")
+
 
 if __name__ == "__main__":
     unittest.main()

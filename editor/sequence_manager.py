@@ -49,6 +49,11 @@ class SequenceManager:
         copy = SequenceDocument(uuid4().hex, f"{source.name} Copy", deepcopy(source.state), deepcopy(source.ai_project), source.playhead, True)
         self.sequences.append(copy); self.active_sequence_id = copy.id; return copy
 
+    def rename(self, sequence_id, name):
+        sequence = next(s for s in self.sequences if s.id == sequence_id)
+        if str(name).strip(): sequence.name = str(name).strip()
+        return sequence
+
     def close(self, sequence_id):
         self.sequences[:] = [s for s in self.sequences if s.id != sequence_id]
         if not self.sequences: self.sequences.append(SequenceDocument(uuid4().hex, "Timeline 1"))

@@ -9,12 +9,13 @@ import re
 import json
 import faulthandler
 import datetime
-from dataclasses import replace
+from copy import deepcopy
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
 from PySide6.QtGui import (
-    QDragEnterEvent, QDropEvent, QColor, QFont, QFontMetricsF,
+    QDragEnterEvent, QDropEvent, QColor, QFont, QFontMetricsF, QAction, QUndoStack,
     QCloseEvent, QDesktopServices, QImage, QKeySequence, QShortcut
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
@@ -26,10 +27,10 @@ from PySide6.QtWidgets import (
     QCheckBox, QPlainTextEdit, QProgressBar, QTableWidget,
     QTableWidgetItem, QHeaderView, QSplitter, QScrollArea, QFormLayout,
     QAbstractItemView, QDialog, QDialogButtonBox, QFontComboBox, QColorDialog,
-    QSlider, QFrame, QInputDialog, QRadioButton, QButtonGroup
+    QSlider, QFrame, QInputDialog, QRadioButton, QButtonGroup, QTabBar, QMenu
 )
 
-from core.models import AIProject, ExportOptions, SubtitleStyle
+from core.models import AIProject, ExportOptions, SubtitleStyle, Scene
 from core.settings_store import SettingsStore
 from core import ffmpeg_engine as ffm
 from core import gemini_engine as gem
@@ -56,6 +57,7 @@ from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible,
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from editor.blur_zone import BlurZone
+from editor.sequence_manager import SequenceManager
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 from core.audio_state import AudioState, replace_narration_source
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
@@ -565,6 +567,7 @@ class MainWindow(QMainWindow):
 
         self.settings = SettingsStore(ROOT)
         self.project = AIProject()
+        self.workspace_project_path = ""
         self.queue: list[str] = []
         self.worker = None
         self.preview_worker = None
@@ -578,6 +581,11 @@ class MainWindow(QMainWindow):
         self.stop_requested = False
         self.process_holder = {"process": None}
         self.editor_document = EditorDocument(self)
+        self.sequence_manager = SequenceManager()
+        self._sequence_undo_stacks = {
+            self.sequence_manager.active.id: self.editor_document.commands.stack
+        }
+        self._switching_sequence = False
         self.preview_service = PreviewService()
         self.thumbnail_service = ThumbnailService(ROOT / ".cache" / "thumbnails", self)
 
@@ -2025,18 +2033,123 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # BASIC VIDEO EDITOR — NON-DESTRUCTIVE TIMELINE
     # ==================================================================
+    def undo_active_sequence(self): self.editor_document.commands.stack.undo()
+    def redo_active_sequence(self): self.editor_document.commands.stack.redo()
+
+    def _project_payload(self):
+        payload = asdict(self.project); payload.pop("sequences", None); payload.pop("active_sequence_id", None); return payload
+
+    def _project_from_payload(self, payload):
+        data = deepcopy(payload or {}); scenes = [Scene(**item) for item in data.pop("scenes", [])]
+        allowed = AIProject.__dataclass_fields__
+        project = AIProject(**{key: value for key, value in data.items() if key in allowed})
+        project.scenes = scenes; return project
+
+    def capture_active_sequence(self):
+        if self._switching_sequence or not hasattr(self, "sequence_tabs"): return
+        sequence = self.sequence_manager.active
+        self.capture_project_state(sequence_capture=False)
+        state = self.export_state_dict()
+        state.update({"preview_cues": list(self.preview_cues), "subtitle_editor_text": self.sub_editor.toPlainText(),
+                      "subtitle_path": self.sub_path.text().strip(), "narration_path": self.narration_path,
+                      "media_bin": list(self.queue)})
+        sequence.state = deepcopy(state); sequence.ai_project = self._project_payload()
+        sequence.playhead = self.editor_current_time(); sequence.dirty = bool(self.editor_clips or self.editor_layers or self.preview_cues or self.narration_path)
+
+    def _empty_sequence_state(self):
+        return {"editor_clips": [], "editor_layers": [], "blur_zones": [], "subtitle_groups": {},
+                "subtitle_group_id": "", "preview_cues": [], "subtitle_editor_text": "", "subtitle_path": "",
+                "narration_path": "", "sub_enabled": False, "blur_enabled": False, "auto_cover_source_subtitle": False,
+                "logo_enabled": False, "overlay_enabled": False, "editor_use_timeline": True, "media_bin": list(self.queue)}
+
+    def restore_active_sequence(self):
+        sequence = self.sequence_manager.active; self._switching_sequence = True; self._restoring_state = True
+        try:
+            self.player.stop(); self.pause_live_audio_tracks()
+            self.project = self._project_from_payload(sequence.ai_project) if sequence.ai_project else AIProject()
+            state = self._empty_sequence_state(); state.update(deepcopy(sequence.state or {}))
+            self.editor_clips.clear(); self.editor_layers.clear(); self.preview_cues = []; self.blur_zone_list.clear()
+            self.editor_document.subtitle_groups.clear(); self.sub_editor.clear(); self.sub_path.clear(); self.voice_file.clear(); self.narration_path = ""
+            self.apply_export_state(state)
+            self.preview_cues = [tuple(cue) for cue in state.get("preview_cues", [])]
+            self.sub_editor.setPlainText(str(state.get("subtitle_editor_text", "")))
+            self.sub_path.setText(str(state.get("subtitle_path", ""))); self.narration_path = str(state.get("narration_path", "")); self.voice_file.setText(self.narration_path)
+            self.queue = list(state.get("media_bin", self.queue)); self._refresh_professional_panels()
+            self.ai_video_path.setText(self.project.video_path); self.ai_summary.setPlainText(self.project.analysis_summary); self.transcript.setPlainText(self.project.transcript); self.refresh_scene_table()
+            self.editor_document.commands.stack = self._sequence_undo_stacks.setdefault(sequence.id, QUndoStack(self))
+            self.editor_refresh_all()
+            if self.editor_clips:
+                self.editor_clip_selected(0, seek=False); self.editor_seek_clip(0, float(self.editor_clips[0].get("source_start", 0)), autoplay=False)
+                self.preview_pending_position = max(0, int(sequence.playhead * 1000))
+            else: self.clear_active_timeline_preview()
+            self.refresh_live_audio_sources(); self.update_preview_subtitle(sequence.playhead); self.update_live_overlay_state()
+        finally:
+            self._restoring_state = False; self._switching_sequence = False
+
+    def refresh_sequence_tabs(self):
+        if not hasattr(self, "sequence_tabs"): return
+        self.sequence_tabs.blockSignals(True); self.sequence_tabs.clear()
+        active_index = 0
+        for index, sequence in enumerate(self.sequence_manager.sequences):
+            self.sequence_tabs.addTab(sequence.name); self.sequence_tabs.setTabData(index, sequence.id)
+            if sequence.id == self.sequence_manager.active_sequence_id: active_index = index
+        plus = self.sequence_tabs.addTab("+"); self.sequence_tabs.setTabData(plus, "__new__")
+        self.sequence_tabs.setTabButton(plus, QTabBar.RightSide, None); self.sequence_tabs.setCurrentIndex(active_index); self.sequence_tabs.blockSignals(False)
+
+    def _sequence_tab_changed(self, index):
+        if self._switching_sequence or index < 0: return
+        sequence_id = self.sequence_tabs.tabData(index)
+        if sequence_id == "__new__": self.create_clean_sequence(); return
+        if not sequence_id or sequence_id == self.sequence_manager.active_sequence_id: return
+        self.capture_active_sequence(); self.sequence_manager.activate(sequence_id); self.restore_active_sequence()
+
+    def create_clean_sequence(self):
+        self.capture_active_sequence(); sequence = self.sequence_manager.create(); sequence.state = self._empty_sequence_state()
+        self._sequence_undo_stacks[sequence.id] = QUndoStack(self); self.refresh_sequence_tabs(); self.restore_active_sequence()
+
+    def close_sequence_at(self, index):
+        sequence_id = self.sequence_tabs.tabData(index)
+        if not sequence_id or sequence_id == "__new__": return
+        sequence = next(s for s in self.sequence_manager.sequences if s.id == sequence_id)
+        if sequence.dirty and QMessageBox.question(self, "Đóng Timeline", f"Đóng {sequence.name} và bỏ trạng thái chưa lưu?", QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes: return
+        self.sequence_manager.close(sequence_id); self._sequence_undo_stacks.pop(sequence_id, None); self.refresh_sequence_tabs(); self.restore_active_sequence()
+
+    def _sequence_tab_menu(self, pos):
+        index = self.sequence_tabs.tabAt(pos); sequence_id = self.sequence_tabs.tabData(index)
+        if not sequence_id or sequence_id == "__new__": return
+        menu = QMenu(self); rename = menu.addAction("Rename"); duplicate = menu.addAction("Duplicate"); menu.addSeparator(); close = menu.addAction("Close"); close_others = menu.addAction("Close Others")
+        chosen = menu.exec(self.sequence_tabs.mapToGlobal(pos))
+        if chosen == rename:
+            sequence = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); name, ok = QInputDialog.getText(self, "Rename Timeline", "Name", text=sequence.name)
+            if ok and name.strip(): sequence.name = name.strip(); self.refresh_sequence_tabs()
+        elif chosen == duplicate:
+            self.capture_active_sequence(); copy = self.sequence_manager.duplicate(sequence_id); self._sequence_undo_stacks[copy.id] = QUndoStack(self); self.refresh_sequence_tabs(); self.restore_active_sequence()
+        elif chosen == close: self.close_sequence_at(index)
+        elif chosen == close_others:
+            self.capture_active_sequence(); keep = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); self.sequence_manager.sequences[:] = [keep]; self.sequence_manager.active_sequence_id = keep.id; self.refresh_sequence_tabs(); self.restore_active_sequence()
+
     def _build_basic_editor_panel(self, parent_layout):
         self.editor_panel = QGroupBox("✂ Basic Video Editor")
         self.editor_panel.setMinimumHeight(130)
         layout = QVBoxLayout(self.editor_panel)
         layout.setSpacing(5)
 
+        self.sequence_tabs = QTabBar()
+        self.sequence_tabs.setTabsClosable(True)
+        self.sequence_tabs.setMovable(True)
+        self.sequence_tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sequence_tabs.currentChanged.connect(self._sequence_tab_changed)
+        self.sequence_tabs.tabCloseRequested.connect(self.close_sequence_at)
+        self.sequence_tabs.customContextMenuRequested.connect(self._sequence_tab_menu)
+        layout.addWidget(self.sequence_tabs)
+        self.refresh_sequence_tabs()
+
         header = QHBoxLayout()
-        undo_button = QPushButton("↶ Undo"); undo_button.clicked.connect(self.editor_document.commands.stack.undo)
-        redo_button = QPushButton("↷ Redo"); redo_button.clicked.connect(self.editor_document.commands.stack.redo)
-        self.undo_shortcut = QShortcut(QKeySequence.Undo, self); self.undo_shortcut.activated.connect(self.editor_document.commands.stack.undo)
-        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Z"), self); self.redo_shortcut.activated.connect(self.editor_document.commands.stack.redo)
-        self.redo_windows_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self); self.redo_windows_shortcut.activated.connect(self.editor_document.commands.stack.redo)
+        undo_button = QPushButton("↶ Undo"); undo_button.clicked.connect(self.undo_active_sequence)
+        redo_button = QPushButton("↷ Redo"); redo_button.clicked.connect(self.redo_active_sequence)
+        self.undo_shortcut = QShortcut(QKeySequence.Undo, self); self.undo_shortcut.activated.connect(self.undo_active_sequence)
+        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Z"), self); self.redo_shortcut.activated.connect(self.redo_active_sequence)
+        self.redo_windows_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self); self.redo_windows_shortcut.activated.connect(self.redo_active_sequence)
         self.editor_use_timeline = QCheckBox("Dùng timeline khi Xuất Video")
         self.editor_use_timeline.setToolTip(
             "Bật: Xuất Video sẽ render các clip theo đúng thứ tự/trim trên timeline."
@@ -2069,10 +2182,6 @@ class MainWindow(QMainWindow):
         trim_out.setToolTip("Cắt bỏ phần sau vị trí Preview hiện tại")
         trim_out.clicked.connect(self.editor_set_out_at_playhead)
 
-        preview_timeline = QPushButton("▶ Preview Timeline")
-        preview_timeline.setObjectName("cyan")
-        preview_timeline.clicked.connect(self.editor_render_preview)
-
         header.addWidget(undo_button); header.addWidget(redo_button)
         header.addWidget(self.editor_use_timeline)
         header.addWidget(add_file)
@@ -2084,7 +2193,6 @@ class MainWindow(QMainWindow):
         header.addWidget(trim_in)
         header.addWidget(trim_out)
         header.addStretch(1)
-        header.addWidget(preview_timeline)
         layout.addLayout(header)
 
         # Timeline + horizontal scrolling.
@@ -4353,6 +4461,8 @@ class MainWindow(QMainWindow):
         return folder
 
     def project_autosave_path(self) -> Path | None:
+        if self.workspace_project_path:
+            return Path(self.workspace_project_path)
         if not self.project.video_path:
             return None
         if self.project.workspace:
@@ -4371,7 +4481,7 @@ class MainWindow(QMainWindow):
                 self.top_bar.set_project_status("Saving…")
             self.autosave_timer.start()
 
-    def capture_project_state(self):
+    def capture_project_state(self, sequence_capture=True):
         self.sync_scene_table()
         self.project.analysis_summary = self.ai_summary.toPlainText()
         self.project.transcript = self.transcript.toPlainText()
@@ -4379,6 +4489,12 @@ class MainWindow(QMainWindow):
         self.project.subtitle_path = self.sub_path.text().strip()
         self.project.processed_preview_path = self.processed_preview_path
         self.project.export_state = self.export_state_dict()
+        if sequence_capture and hasattr(self, "sequence_manager"):
+            self.capture_active_sequence()
+        if hasattr(self, "sequence_manager"):
+            packed = self.sequence_manager.to_dict()
+            self.project.active_sequence_id = packed["active_sequence_id"]
+            self.project.sequences = packed["sequences"]
 
     def autosave_project(self):
         path = self.project_autosave_path()
@@ -4410,6 +4526,7 @@ class MainWindow(QMainWindow):
             return
         if not path.lower().endswith(".json"):
             path += ".json"
+        self.workspace_project_path = path
         self.project.save(path)
         self.settings.data["last_project"] = path
         self.settings.save()
@@ -4425,7 +4542,17 @@ class MainWindow(QMainWindow):
     def load_project_file(self, path: str, show_message=False):
         try:
             project = AIProject.load(path)
+            self.workspace_project_path = str(Path(path))
             self.project = project
+            packed = {"active_sequence_id": project.active_sequence_id, "sequences": project.sequences}
+            self.sequence_manager = SequenceManager.from_dict(packed, project.export_state, self._project_payload())
+            self._sequence_undo_stacks = {sequence.id: QUndoStack(self) for sequence in self.sequence_manager.sequences}
+            self.refresh_sequence_tabs()
+            if project.sequences:
+                self.restore_active_sequence()
+                self.settings.data["last_project"] = path; self.settings.save()
+                if show_message: QMessageBox.information(self, "Project", "Đã khôi phục project nhiều Timeline.")
+                return
             self.ai_video_path.setText(project.video_path)
             self.ai_summary.setPlainText(project.analysis_summary)
             self.transcript.setPlainText(project.transcript)
