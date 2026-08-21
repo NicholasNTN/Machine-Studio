@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from os import PathLike
+
 
 def active_editor_source(clips):
     active = [clip for clip in (clips or []) if clip.get("enabled", True) and str(clip.get("path", "")).strip()]
@@ -20,3 +22,13 @@ def sequence_narration_path(sequences, sequence_id):
     if sequence is None or not isinstance(sequence.state, dict): return ""
     value = sequence.state.get("narration_path", "")
     return str(value).strip() if not isinstance(value, (dict, list, tuple)) else ""
+
+
+def active_narration_path(ui_path="", sequence_path="", preview_path=""):
+    """Resolve mirrors belonging to the active sequence, never another sequence."""
+    for value in (ui_path, sequence_path, preview_path):
+        if isinstance(value, (str, PathLike)):
+            resolved = str(value).strip()
+            if resolved:
+                return resolved
+    return ""

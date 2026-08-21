@@ -68,7 +68,7 @@ from core.file_dialog_history import FileDialogHistory
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 from core.media_library import migrate_global_media_library
-from core.sequence_context import active_editor_source, find_origin_sequence, sequence_narration_path
+from core.sequence_context import active_editor_source, active_narration_path, find_origin_sequence, sequence_narration_path
 
 
 APP_NAME = "Machine Studio"
@@ -2157,8 +2157,10 @@ class MainWindow(QMainWindow):
         self.capture_project_state(sequence_capture=False)
         state = self.export_state_dict()
         state.pop("workspace_splitter_sizes", None)
+        narration = active_narration_path(self.voice_file.text(), self.narration_path)
+        self.narration_path = narration
         state.update({"preview_cues": list(self.preview_cues), "subtitle_editor_text": self.sub_editor.toPlainText(),
-                      "subtitle_path": self.sub_path.text().strip(), "narration_path": self.narration_path})
+                      "subtitle_path": self.sub_path.text().strip(), "narration_path": narration})
         sequence.state = deepcopy(state); sequence.ai_project = self._project_payload()
         sequence.playhead = self.editor_current_time(); sequence.dirty = bool(self.editor_clips or self.editor_layers or self.preview_cues or self.narration_path)
 
@@ -8268,6 +8270,20 @@ class MainWindow(QMainWindow):
 
     def export_batch(self):
         export_sequence_id = self.sequence_manager.active_sequence_id
+        preview_narration_path = (
+            self.narration_player.source().toLocalFile()
+            if self.narration_player.source().isLocalFile() else ""
+        )
+        sequence_path_before_capture = sequence_narration_path(
+            self.sequence_manager.sequences, export_sequence_id
+        )
+        active_voice_path = active_narration_path(
+            self.voice_file.text(), sequence_path_before_capture, preview_narration_path
+        )
+        if active_voice_path:
+            self.narration_path = active_voice_path
+            if not self.voice_file.text().strip():
+                self.voice_file.setText(active_voice_path)
         self.capture_active_sequence()
         has_editor_timeline = (
             hasattr(self, "editor_use_timeline")
@@ -8300,6 +8316,7 @@ class MainWindow(QMainWindow):
                         )
 
             options = self.gather_export_options(export_sequence_id)
+            export_sequence_narration_path = options.narration_path
             narration_check = ffm.validate_audio_file(options.narration_path) if options.narration_path else None
             if narration_check is not None and not narration_check["valid"]:
                 QMessageBox.warning(
@@ -8323,6 +8340,7 @@ class MainWindow(QMainWindow):
 
         def job(progress, log):
             outputs = []
+            narration_signal = None
 
             def begin_attempt(input_value, output_value):
                 ffm.begin_export_log(
@@ -8330,6 +8348,30 @@ class MainWindow(QMainWindow):
                     sequence_name=export_sequence_name, input_path=input_value,
                     output_path=output_value,
                 )
+                ffm.append_render_log(export_ffmpeg_log, "\n".join([
+                    "[VOICE PARITY]", f"sequence_id={export_sequence_id}",
+                    f"preview_path={preview_narration_path}",
+                    f"sequence_path={export_sequence_narration_path}",
+                    f"export_path={options.narration_path}",
+                ]))
+
+            def verify_narration_source():
+                nonlocal narration_signal
+                if not options.narration_path or narration_signal is not None:
+                    return
+                narration_signal = ffm.inspect_audio_signal(options.narration_path, export_ffmpeg_log)
+                ffm.append_render_log(export_ffmpeg_log, "\n".join([
+                    "[VOICE SOURCE]", f"path={narration_signal['path']}",
+                    f"exists={narration_signal['exists']}", f"size={narration_signal['size']}",
+                    f"duration={narration_signal['duration']}", f"has_audio={narration_signal['has_audio']}",
+                    f"mean_volume={narration_signal['mean_volume']}", f"max_volume={narration_signal['max_volume']}",
+                    f"audible={narration_signal['audible']}",
+                ]))
+                if not narration_signal["audible"]:
+                    raise RuntimeError(
+                        "Timeline hiện tại có Voice nhưng nguồn narration bị im lặng hoặc không hợp lệ. "
+                        "Hãy tạo lại Voice và thử xuất lại."
+                    )
 
             def record_failure(exc, output_value):
                 ffm.append_render_log(
@@ -8345,7 +8387,7 @@ class MainWindow(QMainWindow):
             def verify_audio(output_value):
                 result = ffm.verify_output_audio(output_value, export_ffmpeg_log)
                 ffm.append_render_log(export_ffmpeg_log, "\n".join([
-                    "[AUDIO EXPORT]", f"sequence_id={export_sequence_id}",
+                    "[FINAL AUDIO]", f"sequence_id={export_sequence_id}",
                     f"narration_expected={bool(options.narration_path)}", f"narration_path={options.narration_path}",
                     f"narration_exists={bool(narration_check and narration_check['exists'])}",
                     f"narration_duration={narration_check['duration'] if narration_check else 0}",
@@ -8407,6 +8449,7 @@ class MainWindow(QMainWindow):
                 )
 
                 try:
+                    verify_narration_source()
                     editor_engine.render_timeline(
                         self.editor_clips, str(timeline_source), target_width=tw,
                         target_height=th, preview=False, log=log,
@@ -8447,6 +8490,7 @@ class MainWindow(QMainWindow):
                 begin_attempt(source, str(target))
 
                 try:
+                    verify_narration_source()
                     ffm.export_video(
                         source,
                         str(temp_target),

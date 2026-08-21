@@ -251,6 +251,29 @@ def verify_output_audio(path: str, log_file=None) -> dict:
     return result
 
 
+def inspect_audio_signal(path: str, log_file=None) -> dict:
+    """Probe an audio source and measure whether it contains an audible signal."""
+    result = validate_audio_file(path)
+    result.update(size=0, mean_volume=None, max_volume=None, audible=False)
+    try:
+        result["size"] = Path(result["path"]).stat().st_size if result["exists"] else 0
+    except OSError:
+        pass
+    if not result["valid"]:
+        return result
+    ffmpeg = find_binary("ffmpeg")
+    output = run(
+        [ffmpeg, "-hide_banner", "-i", result["path"], "-vn", "-af", "volumedetect", "-f", "null", "-"],
+        log_file=log_file,
+    )
+    for key in ("mean_volume", "max_volume"):
+        match = re.search(rf"{key}:\s*(-?inf|-?\d+(?:\.\d+)?)\s*dB", output, re.I)
+        if match:
+            result[key] = float("-inf") if match.group(1).lower() == "-inf" else float(match.group(1))
+    result["audible"] = result["max_volume"] is not None and result["max_volume"] >= -70.0
+    return result
+
+
 _NVENC_RUNTIME_OK = None
 
 

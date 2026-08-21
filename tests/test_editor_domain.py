@@ -21,7 +21,7 @@ from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float
 from core import editor_engine, subtitle_engine, ffmpeg_engine
 from core.script_roles import assign_role, voice_for_role
 from core.media_library import migrate_global_media_library
-from core.sequence_context import active_editor_source, find_origin_sequence
+from core.sequence_context import active_editor_source, active_narration_path, find_origin_sequence
 from core.sequence_context import sequence_narration_path
 from core.file_dialog_history import FileDialogHistory
 from editor.text_style import TextStyle
@@ -44,6 +44,12 @@ class EditorDomainTests(unittest.TestCase):
         first.state["narration_path"] = ""
         self.assertEqual(sequence_narration_path(manager.sequences, first.id), "")
 
+    def test_active_narration_reconciles_ui_sequence_and_preview_mirrors(self):
+        self.assertEqual(active_narration_path("voice-ui.wav", "voice-state.wav", "voice-preview.wav"), "voice-ui.wav")
+        self.assertEqual(active_narration_path("", "voice-state.wav", "voice-preview.wav"), "voice-state.wav")
+        self.assertEqual(active_narration_path("", "", "voice-preview.wav"), "voice-preview.wav")
+        self.assertEqual(active_narration_path({}, [], ()), "")
+
     def test_narration_only_and_mixed_audio_plans_are_explicit(self):
         label, expression = ffmpeg_engine.audio_mix_filter(["anar"])
         self.assertEqual(label, "anar"); self.assertIsNone(expression)
@@ -58,6 +64,22 @@ class EditorDomainTests(unittest.TestCase):
             self.assertFalse(ffmpeg_engine.validate_audio_file(empty)["valid"])
         with patch.object(ffmpeg_engine, "probe", return_value={"has_audio": False, "duration": 5.0}):
             self.assertFalse(ffmpeg_engine.verify_output_audio("out.mp4")["has_audio"])
+
+    def test_audio_signal_inspection_detects_audible_and_silent_sources(self):
+        valid = {"path": "voice.wav", "exists": True, "has_audio": True, "duration": 2.0, "valid": True}
+        with patch.object(ffmpeg_engine, "validate_audio_file", return_value=valid), \
+             patch.object(ffmpeg_engine, "find_binary", return_value="ffmpeg"), \
+             patch.object(ffmpeg_engine, "run", return_value="mean_volume: -24.0 dB\nmax_volume: -2.5 dB"), \
+             patch.object(Path, "stat") as stat:
+            stat.return_value.st_size = 1234
+            result = ffmpeg_engine.inspect_audio_signal("voice.wav")
+        self.assertTrue(result["audible"]); self.assertEqual(result["max_volume"], -2.5)
+        with patch.object(ffmpeg_engine, "validate_audio_file", return_value=valid), \
+             patch.object(ffmpeg_engine, "find_binary", return_value="ffmpeg"), \
+             patch.object(ffmpeg_engine, "run", return_value="mean_volume: -91.0 dB\nmax_volume: -80.0 dB"), \
+             patch.object(Path, "stat") as stat:
+            stat.return_value.st_size = 1234
+            self.assertFalse(ffmpeg_engine.inspect_audio_signal("voice.wav")["audible"])
 
     def test_file_dialog_history_is_local_and_handles_missing_paths(self):
         settings = {}; saved = []
