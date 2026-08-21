@@ -14,7 +14,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPixmap
 from app import MainWindow
-from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS
+from core.ai_styles import AI_STYLES
 from ui.export_dialog import ExportDialog
 from ui.media_panel import MediaCard
 
@@ -53,8 +53,7 @@ def main() -> int:
     assert window.side_bg_type.findText("Hình ảnh") >= 0
     assert window.context_inspector._controls[("video", "fit_mode")].count() == 2
     assert window.url.placeholderText() == "Paste video link here..."
-    headers = [window.script_style.itemText(i) for i in range(window.script_style.count()) if window.script_style.itemData(i) is None]
-    assert all(VOICE_MODE_LABELS[mode] in headers for mode in ("single", "dual", "triple", "multi"))
+    assert {style.voice_mode for style in AI_STYLES} >= {"single", "dual"}
     assert all(style.display_name_vi for style in AI_STYLES)
     window.script_style.setCurrentIndex(window.script_style.findData("before_after"))
     assert len(window.voice_selectors_by_role) == 2

@@ -5996,6 +5996,19 @@ class MainWindow(QMainWindow):
                 result.append(canonical)
         return result
 
+    def _blur_zone_snapshot(self):
+        return [dict(self.blur_zone_list.item(index).data(Qt.UserRole) or {}) for index in range(self.blur_zone_list.count())]
+
+    def _apply_blur_snapshot(self, zones):
+        self.blur_zone_list.clear()
+        for zone in zones:
+            item = QListWidgetItem(); item.setData(Qt.UserRole, dict(zone)); self.blur_zone_list.addItem(item)
+        self.refresh_blur_zone_labels(); self.update_live_overlay_state(); self._refresh_professional_panels(); self.schedule_autosave()
+
+    def _push_blur_undo(self, label, before):
+        after = self._blur_zone_snapshot()
+        if before != after: self.editor_document.commands.execute(LayerSnapshotCommand(label, before, after, self._apply_blur_snapshot))
+
     def auto_subtitle_zone(self):
         row = self._find_auto_blur_row()
         if row < 0:
@@ -6186,6 +6199,8 @@ class MainWindow(QMainWindow):
 
     def on_live_blur_zone_changed(self, index, zone):
         try:
+            if not hasattr(self, "_blur_drag_before") or self._blur_drag_before is None:
+                self._blur_drag_before = self._blur_zone_snapshot()
             row = int(zone.get("_list_row", index))
             if not (0 <= row < self.blur_zone_list.count()):
                 return
@@ -6261,6 +6276,10 @@ class MainWindow(QMainWindow):
             self.schedule_processed_preview()
             return
 
+        if hasattr(self, "live_overlay") and self.live_overlay.selected_type == "blur" and getattr(self, "_blur_drag_before", None) is not None:
+            before = self._blur_drag_before; self._blur_drag_before = None
+            self._push_blur_undo("Transform blur", before); self.schedule_autosave(); self.schedule_processed_preview(); return
+
         if hasattr(self, "sub_auto_layout") and self.sub_auto_layout.isChecked():
             self.sync_sub_layout_to_auto_blur(update_cues=True)
         else:
@@ -6330,9 +6349,10 @@ class MainWindow(QMainWindow):
         if kind == "blur":
             zones = self.all_live_blur_zones()
             if 0 <= index < len(zones):
+                before = self._blur_zone_snapshot()
                 zone = dict(zones[index]); zone.pop("_list_row", None); zone["auto"] = False
                 zone["x"] = min(97.0, float(zone.get("x", 0)) + 2); zone["y"] = min(97.0, float(zone.get("y", 0)) + 2)
-                self.add_blur_zone(zone)
+                self.add_blur_zone(zone); self._push_blur_undo("Duplicate blur", before)
         elif kind == "editor_layer" and 0 <= index < len(self.editor_layers):
             before = [dict(layer) for layer in self.editor_layers]
             duplicate = deepcopy(self.editor_layers[index]); duplicate["id"] = f"{duplicate.get('type', 'layer')}-{uuid4().hex[:10]}"
@@ -6344,7 +6364,9 @@ class MainWindow(QMainWindow):
         if kind == "blur":
             zones = self.all_live_blur_zones()
             if 0 <= index < len(zones):
+                before = self._blur_zone_snapshot()
                 self.blur_zone_list.setCurrentRow(int(zones[index].get("_list_row", index))); self.remove_blur_zone()
+                self._push_blur_undo("Delete blur", before)
         elif kind == "editor_layer" and 0 <= index < len(self.editor_layers):
             before = [dict(layer) for layer in self.editor_layers]; self.editor_layers.pop(index); self.editor_selected_layer = -1
             self.editor_refresh_layer_list(); self.update_live_overlay_state(); self._push_layer_undo("Delete layer", before); self.schedule_autosave()
