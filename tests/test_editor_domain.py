@@ -11,6 +11,7 @@ from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_r
 from editor.blur_zone import BlurZone, source_zone_canvas_rect
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
+from core.audio_state import AudioState, replace_narration_source
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -131,6 +132,12 @@ class EditorDomainTests(unittest.TestCase):
         zone = BlurZone.from_dict({"x": 12, "y": 73, "w": 75, "h": 16})
         self.assertEqual(zone.coordinate_space, "source_video")
         self.assertAlmostEqual(zone.width, .75)
+
+    def test_narration_replacement_preserves_user_audio_state(self):
+        state = AudioState(True, .42, True, .67, False, .31)
+        replacement = replace_narration_source(state, "new-narration.wav")
+        self.assertEqual(replacement.source, "new-narration.wav")
+        self.assertEqual(replacement.state, state)
 
 
 if __name__ == "__main__":

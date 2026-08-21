@@ -56,6 +56,7 @@ from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from editor.blur_zone import BlurZone
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
+from core.audio_state import AudioState, replace_narration_source
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 
@@ -669,6 +670,7 @@ class MainWindow(QMainWindow):
         self.live_audio_sync_timer.timeout.connect(self.sync_live_audio_tracks)
         self.live_audio_sync_timer.start()
         self.music_player.mediaStatusChanged.connect(self.on_live_music_status)
+        self.narration_player.mediaStatusChanged.connect(self.on_narration_media_status)
 
         self.log_line(get_system_summary())
         self.status("Sẵn sàng")
@@ -4741,7 +4743,6 @@ class MainWindow(QMainWindow):
         if self.project.narration_path and Path(self.project.narration_path).exists():
             self.narration_path = self.project.narration_path
             self.voice_file.setText(self.narration_path)
-            self.mute_original_voice.setChecked(True)
         if self.project.subtitle_path and Path(self.project.subtitle_path).exists():
             self.sub_path.setText(self.project.subtitle_path)
         if switch_tab:
@@ -4760,6 +4761,42 @@ class MainWindow(QMainWindow):
             player.stop()
             player.setSource(QUrl())
 
+    def current_audio_state(self):
+        return AudioState(
+            original_audio_muted=self.mute_original_voice.isChecked(),
+            original_audio_volume=self.source_volume.value() / 100.0,
+            narration_muted=self.narration_output.isMuted(),
+            narration_volume=self.narration_volume.value() / 100.0,
+            music_muted=self.mute_music.isChecked(),
+            music_volume=self.music_volume.value() / 100.0,
+        )
+
+    def replace_live_narration_source(self, path):
+        replacement = replace_narration_source(self.current_audio_state(), path)
+        current = self.narration_player.source().toLocalFile() if self.narration_player.source().isLocalFile() else ""
+        same_source = (str(Path(current)) == str(Path(replacement.source))) if current and replacement.source else (current == replacement.source)
+        if same_source:
+            return
+        self.narration_player.stop()
+        self.narration_player.setAudioOutput(self.narration_output)
+        self.narration_player.setSource(QUrl.fromLocalFile(replacement.source) if replacement.source and Path(replacement.source).exists() else QUrl())
+        self.narration_output.setMuted(replacement.state.narration_muted)
+        self.narration_output.setVolume(max(0.0, min(1.0, replacement.state.narration_volume)))
+        self.update_live_audio_mix()
+        self.log_audio_state("main")
+        self.log_audio_state("narration")
+
+    def on_narration_media_status(self, status):
+        if status in (QMediaPlayer.LoadedMedia, QMediaPlayer.BufferedMedia):
+            self.narration_player.setAudioOutput(self.narration_output)
+            self.update_live_audio_mix()
+        self.log_audio_state("narration", status)
+
+    def log_audio_state(self, player_name, media_status=None):
+        player, output = (self.player, self.audio_output) if player_name == "main" else (self.narration_player, self.narration_output)
+        status = media_status if media_status is not None else player.mediaStatus()
+        self.log_line(f"[AUDIO STATE] player={player_name} volume={output.volume():.3f} muted={output.isMuted()} mediaStatus={status} playbackState={player.playbackState()}")
+
     def refresh_live_audio_sources(self):
         if self.preview_is_processed:
             # Processed render already contains final mix.
@@ -4771,7 +4808,7 @@ class MainWindow(QMainWindow):
         music = self.music_file.text().strip()
         accompaniment = self.accompaniment_path if self.mute_original_voice.isChecked() else ""
 
-        self.set_aux_media_if_needed(self.narration_player, narration)
+        self.replace_live_narration_source(narration)
         self.set_aux_media_if_needed(self.music_player, music)
         self.set_aux_media_if_needed(self.accompaniment_player, accompaniment)
         self.update_live_audio_mix()
@@ -6413,9 +6450,6 @@ class MainWindow(QMainWindow):
                     scene.voice_file = str(
                         item.get("path", "")
                     )
-
-            self.mute_original_voice.setChecked(True)
-            self.narration_volume.setValue(100)
 
             synced_srt = workspace / "subtitle_synced_en.srt"
             ffm.write_srt_from_voice_manifest(
