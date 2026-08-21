@@ -612,7 +612,8 @@ def export_video(
         current = "veffects"
 
     # Multiple blur/privacy zones.
-    zones = list(getattr(options, "blur_zones", []) or [])
+    zones = [dict(zone) for zone in (getattr(options, "blur_zones", []) or [])
+             if isinstance(zone, dict) and zone.get("enabled", True) and zone.get("visible", True)]
     if options.blur_enabled and not zones and options.blur_w > 0 and options.blur_h > 0:
         # Backward compatibility with old pixel-based project.
         zones = [{
@@ -626,7 +627,8 @@ def export_video(
         auto_zone = dict(getattr(options, "auto_subtitle_zone", {}) or {})
         if not auto_zone:
             auto_zone = {"x": 10, "y": 69, "w": 80, "h": 15, "auto": True}
-        zones.append(auto_zone)
+        if not any(z.get("source") == "auto_subtitle" or z.get("auto") for z in zones):
+            zones.append(auto_zone)
 
     if options.blur_enabled:
         style = getattr(options, "blur_style", "Đen mờ")

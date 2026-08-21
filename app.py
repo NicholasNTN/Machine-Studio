@@ -58,7 +58,7 @@ from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible, active_subtitle_render_state
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
-from editor.blur_zone import BlurZone
+from editor.blur_zone import BlurZone, normalize_blur_zones
 from editor.sequence_manager import SequenceManager
 from editor.text_style import TextStyle
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
@@ -2138,6 +2138,7 @@ class MainWindow(QMainWindow):
 
     def capture_active_sequence(self):
         if self._switching_sequence or not hasattr(self, "sequence_strip"): return
+        self._finish_layer_style_edit()
         sequence = self.sequence_manager.active
         self.capture_project_state(sequence_capture=False)
         state = self.export_state_dict()
@@ -2478,6 +2479,10 @@ class MainWindow(QMainWindow):
         self.editor_text_anim_duration = QSpinBox(); self.editor_text_anim_duration.setRange(60, 1200); self.editor_text_anim_duration.setValue(220); self.editor_text_anim_duration.setSuffix(" ms")
         self.editor_text_anim_strength = QSpinBox(); self.editor_text_anim_strength.setRange(10, 200); self.editor_text_anim_strength.setValue(100); self.editor_text_anim_strength.setSuffix(" %")
         self.editor_text_scale = QDoubleSpinBox(); self.editor_text_scale.setRange(10, 500); self.editor_text_scale.setValue(100); self.editor_text_scale.setSuffix(" %")
+        self._layer_style_undo_timer = QTimer(self)
+        self._layer_style_undo_timer.setSingleShot(True)
+        self._layer_style_undo_timer.setInterval(450)
+        self._layer_style_undo_timer.timeout.connect(self._finish_layer_style_edit)
 
         props.addWidget(QLabel("Nội dung"), 0, 0)
         props.addWidget(self.editor_layer_text, 0, 1, 1, 5)
@@ -3374,6 +3379,7 @@ class MainWindow(QMainWindow):
         )
         if not ok or not text.strip():
             return
+        before = [dict(item) for item in self.editor_layers]
         layer = editor_engine.make_text_layer(
             text.strip(),
             max(
@@ -3395,6 +3401,7 @@ class MainWindow(QMainWindow):
         )
         self.update_live_overlay_state()
         self.schedule_autosave()
+        self._push_layer_undo("Add text", before)
 
     def editor_add_image_layer(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -3503,6 +3510,8 @@ class MainWindow(QMainWindow):
             index = int(meta.get("index", -1))
             if not (0 <= index < len(self.editor_layers)):
                 return
+            if index != self.editor_selected_layer:
+                self._finish_layer_style_edit()
             self.editor_selected_layer = index
             layer = self.editor_layers[index]
 
@@ -3526,6 +3535,7 @@ class MainWindow(QMainWindow):
                 w.blockSignals(True)
 
             if layer.get("type") == "text":
+                self.editor_layer_props_panel.setVisible(True)
                 self.editor_layer_text.setText(
                     str(layer.get("text", "") or "")
                 )
@@ -3616,6 +3626,8 @@ class MainWindow(QMainWindow):
         index = self.editor_selected_layer
         if not (0 <= index < len(self.editor_layers)):
             return
+        if self.editor_layers[index].get("type") == "text" and getattr(self, "_layer_style_edit_before", None) is None:
+            self._layer_style_edit_before = [dict(item) for item in self.editor_layers]
         layer = dict(self.editor_layers[index])
 
         layer["start"] = max(
@@ -3660,6 +3672,15 @@ class MainWindow(QMainWindow):
         self.update_live_overlay_state()
         self.editor_refresh_layer_list()
         self.schedule_autosave()
+        if layer.get("type") == "text":
+            self._layer_style_undo_timer.start()
+
+    def _finish_layer_style_edit(self):
+        before = getattr(self, "_layer_style_edit_before", None)
+        if before is None:
+            return
+        self._layer_style_edit_before = None
+        self._push_layer_undo("Edit text style", before)
 
     def apply_text_preset_to_selected(self, name):
         index = getattr(self, "editor_selected_layer", -1)
@@ -5887,7 +5908,11 @@ class MainWindow(QMainWindow):
                 zone = {"id": canonical.id, "coordinate_space": canonical.coordinate_space,
                         "x": canonical.x * 100, "y": canonical.y * 100,
                         "w": canonical.width * 100, "h": canonical.height * 100,
-                        "auto": bool(zone.get("auto", False))}
+                        "auto": canonical.source == "auto_subtitle",
+                        "source": canonical.source, "kind": canonical.kind,
+                        "style": canonical.style, "strength": canonical.strength,
+                        "enabled": canonical.enabled, "visible": canonical.visible,
+                        "confidence": canonical.confidence}
             value = {
                 "id": BlurZone.from_dict(zone).id,
                 "coordinate_space": "source_video",
@@ -5895,8 +5920,17 @@ class MainWindow(QMainWindow):
                 "y": float(zone.get("y", 8.0)),
                 "w": float(zone.get("w", 26.0)),
                 "h": float(zone.get("h", 14.0)),
-                "auto": bool(zone.get("auto", False)),
+                "auto": bool(zone.get("auto", False) or zone.get("source") == "auto_subtitle"),
+                "source": "auto_subtitle" if (zone.get("auto") or zone.get("source") == "auto_subtitle") else "manual",
+                "kind": str(zone.get("kind") or "blur"),
+                "style": str(zone.get("style") or ""),
+                "strength": float(zone.get("strength", 20) or 20),
+                "enabled": bool(zone.get("enabled", True)),
+                "visible": bool(zone.get("visible", True)),
             }
+            if zone.get("confidence") is not None:
+                try: value["confidence"] = float(zone["confidence"])
+                except (TypeError, ValueError): pass
             value["x"] = max(0.0, min(97.0, value["x"]))
             value["y"] = max(0.0, min(97.0, value["y"]))
             value["w"] = max(3.0, min(100.0 - value["x"], value["w"]))
@@ -5985,15 +6019,14 @@ class MainWindow(QMainWindow):
             item.setText(self.format_blur_zone(zone, number))
 
     def blur_zones(self):
-        """Manual regions only; auto subtitle mask has its own export field."""
+        """All sequence-local blur content, including detected subtitle masks."""
         result = []
         for i in range(self.blur_zone_list.count()):
             zone = dict(self.blur_zone_list.item(i).data(Qt.UserRole) or {})
-            if not zone.get("auto"):
-                zone.pop("_list_row", None)
-                canonical = BlurZone.from_dict(zone).to_dict()
-                canonical["auto"] = False
-                result.append(canonical)
+            zone.pop("_list_row", None)
+            canonical = BlurZone.from_dict(zone).to_dict()
+            canonical["auto"] = canonical.get("source") == "auto_subtitle"
+            result.append(canonical)
         return result
 
     def _blur_zone_snapshot(self):
@@ -6023,6 +6056,8 @@ class MainWindow(QMainWindow):
         zones = []
         for row in range(self.blur_zone_list.count()):
             zone = dict(self.blur_zone_list.item(row).data(Qt.UserRole) or {})
+            if not zone.get("enabled", True) or not zone.get("visible", True):
+                continue
             if zone.get("auto") and not self.auto_cover_source_sub.isChecked():
                 continue
             zone["_list_row"] = row
@@ -7975,14 +8010,9 @@ class MainWindow(QMainWindow):
         )
         self.editor_selected_layer = -1
 
-        if isinstance(data.get("blur_zones"), list):
-            self.blur_zone_list.clear()
-            auto_zone = data.get("auto_subtitle_zone")
-            if isinstance(auto_zone, dict) and auto_zone:
-                self.ensure_auto_sub_zone(auto_zone)
-            for zone in data["blur_zones"]:
-                if isinstance(zone, dict):
-                    self.add_blur_zone(zone)
+        self.blur_zone_list.clear()
+        for zone in normalize_blur_zones(data.get("blur_zones"), data.get("auto_subtitle_zone")):
+            self.add_blur_zone(zone)
 
         # Restore professional workspace layout without firing editing actions.
         self.preview_zoom_percent = max(
@@ -8030,11 +8060,13 @@ class MainWindow(QMainWindow):
                 data.get("editor_layer_props_visible", False)
             )
             self.editor_layer_props_toggle.blockSignals(True)
-            self.editor_layer_props_toggle.setChecked(props_visible)
+            self.editor_layer_props_toggle.setChecked(True)
             self.editor_layer_props_toggle.blockSignals(False)
-            self.editor_layer_props_panel.setVisible(props_visible)
+            # This panel is now the Text Settings page. It must never inherit
+            # the old collapsible Layers-panel visibility preference.
+            self.editor_layer_props_panel.setVisible(True)
             self.editor_layer_props_toggle.setText(
-                "▾ Thuộc tính" if props_visible else "▸ Thuộc tính"
+                "▾ Thuộc tính"
             )
 
         left_visible = bool(data.get("left_panel_visible", True))

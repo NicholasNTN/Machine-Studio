@@ -16,6 +16,13 @@ class BlurZone:
     y: float = 0.0
     width: float = 1.0
     height: float = 0.2
+    kind: str = "blur"
+    source: str = "manual"
+    style: str = ""
+    strength: float = 20.0
+    enabled: bool = True
+    visible: bool = True
+    confidence: float | None = None
 
     def to_dict(self): return asdict(self)
 
@@ -30,7 +37,38 @@ class BlurZone:
             width, height = float(data.get("w", 100)) / 100, float(data.get("h", 20)) / 100
         x = max(0.0, min(1.0, x)); y = max(0.0, min(1.0, y))
         width = max(0.001, min(1.0 - x, width)); height = max(0.001, min(1.0 - y, height))
-        return cls(str(data.get("id") or uuid4().hex), "source_video", x, y, width, height)
+        source = str(data.get("source") or ("auto_subtitle" if data.get("auto") else "manual"))
+        confidence = data.get("confidence")
+        try: confidence = None if confidence is None else float(confidence)
+        except (TypeError, ValueError): confidence = None
+        return cls(
+            str(data.get("id") or uuid4().hex), "source_video", x, y, width, height,
+            str(data.get("kind") or "blur"), source,
+            str(data.get("style") or ""), float(data.get("strength", 20) or 20),
+            bool(data.get("enabled", True)), bool(data.get("visible", True)), confidence,
+        )
+
+
+def normalize_blur_zones(zones, legacy_auto_zone=None):
+    """Return one canonical collection while accepting pre-3D split projects."""
+    result = []
+    seen = set()
+    candidates = list(zones or []) if isinstance(zones, list) else []
+    if isinstance(legacy_auto_zone, dict) and legacy_auto_zone:
+        candidates.append({**legacy_auto_zone, "source": "auto_subtitle", "auto": True})
+    for value in candidates:
+        if not isinstance(value, dict):
+            continue
+        try: zone = BlurZone.from_dict(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if zone.id in seen:
+            continue
+        seen.add(zone.id)
+        item = zone.to_dict()
+        item["auto"] = zone.source == "auto_subtitle"
+        result.append(item)
+    return result
 
 
 def source_zone_canvas_rect(zone, source_width, source_height, canvas_width, canvas_height, transform=None):

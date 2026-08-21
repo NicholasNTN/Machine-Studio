@@ -21,6 +21,7 @@ from core.script_roles import assign_role, voice_for_role
 from core.media_library import migrate_global_media_library
 from core.sequence_context import active_editor_source, find_origin_sequence
 from editor.text_style import TextStyle
+from editor.blur_zone import normalize_blur_zones
 from editor.layer_order import CANONICAL_LAYER_ORDER
 from editor.preview_binding import PreviewBinding, binding_after_clip_change
 from editor.sequence_manager import SequenceManager
@@ -256,6 +257,28 @@ class EditorDomainTests(unittest.TestCase):
         manager.activate(first.id); self.assertEqual(manager.active.state["narration_path"], "voice-a.wav")
         manager.activate(second.id); self.assertEqual(manager.active.state["blur_zones"][0]["id"], "b")
 
+    def test_auto_blur_is_canonical_sequence_content_and_legacy_state_migrates(self):
+        zones = normalize_blur_zones([], {"id": "auto-a", "x": 10, "y": 70, "w": 80, "h": 12})
+        self.assertEqual(zones[0]["source"], "auto_subtitle")
+        self.assertTrue(zones[0]["auto"])
+        manager = SequenceManager(); first = manager.active
+        first.state["blur_zones"] = zones
+        second = manager.create(); second.state["blur_zones"] = normalize_blur_zones(
+            [{"id": "auto-b", "x": 20, "y": 60, "w": 60, "h": 10, "auto": True}]
+        )
+        manager.activate(first.id); self.assertEqual(manager.active.state["blur_zones"][0]["id"], "auto-a")
+        manager.activate(second.id); self.assertEqual(manager.active.state["blur_zones"][0]["id"], "auto-b")
+
+    def test_auto_blur_round_trips_with_project(self):
+        manager = SequenceManager(); manager.active.state["blur_zones"] = normalize_blur_zones(
+            [{"id": "auto-save", "x": 12, "y": 72, "w": 76, "h": 11, "source": "auto_subtitle"}]
+        )
+        project = AIProject(active_sequence_id=manager.active_sequence_id, sequences=manager.to_dict()["sequences"])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "blur-project.json"; project.save(path); restored = AIProject.load(path)
+        zone = restored.sequences[0]["state"]["blur_zones"][0]
+        self.assertEqual(zone["id"], "auto-save"); self.assertEqual(zone["source"], "auto_subtitle")
+
     def test_active_ai_source_uses_only_active_editor_composition(self):
         self.assertEqual(active_editor_source([]), ("empty", ""))
         self.assertEqual(active_editor_source([{"path": "B.mp4", "enabled": True}]), ("single", "B.mp4"))
@@ -279,6 +302,15 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(subtitle.primary_color, "#F6D77A")
         layer = editor_engine.make_text_layer("Text", 5.0); layer.update(text.to_dict())
         self.assertEqual(layer["font_size"], 90); self.assertIn("outline_width", layer); self.assertIn("animation", layer)
+
+    def test_manual_text_style_serialization_keeps_object_values(self):
+        first = TextStyle(font_name="Oswald", font_size=90, color="#FF0000", rotation=12.5)
+        second = TextStyle(font_name="Arial", font_size=50, color="#FFFFFF")
+        restored_first = TextStyle.from_dict(first.to_dict())
+        restored_second = TextStyle.from_dict(second.to_dict())
+        self.assertEqual((restored_first.font_name, restored_first.font_size, restored_first.color), ("Oswald", 90, "#FF0000"))
+        self.assertEqual((restored_second.font_name, restored_second.font_size, restored_second.color), ("Arial", 50, "#FFFFFF"))
+        self.assertEqual(restored_first.rotation, 12.5)
 
     def test_multi_sequence_project_schema_round_trip(self):
         manager = SequenceManager(); manager.create("Timeline 2")

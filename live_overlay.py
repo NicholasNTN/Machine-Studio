@@ -1084,28 +1084,24 @@ class InteractivePreviewOverlay(QWidget):
                     )
                     return
 
-            # Extra editor layers are top-most interactive overlays.
-            for i in reversed(range(len(self.editor_layers))):
-                layer = self.editor_layers[i]
-                if (
-                    self.editor_layer_active(layer)
-                    and self.editor_layer_rect(i).contains(pos)
-                ):
-                    self.selected_type = "editor_layer"
-                    self.selected_index = i
-                    self.drag_mode = "move_editor_layer"
-                    self.start_editor_layer = dict(layer)
-                    self.selectionChanged.emit("editor_layer", i)
-                    self.update()
-                    return
+            # Select exactly once using the same top-most order as context and
+            # double-click hit testing. Selection and handles become visible in
+            # this press event; double-click is reserved for the edit action.
+            hit_kind, hit_index = self.hit_test(pos)
+            if hit_kind:
+                self.selected_type = hit_kind
+                self.selected_index = hit_index
+                self.selectionChanged.emit(hit_kind, hit_index)
+                self.update()
 
-            if (
-                self.sub_enabled
-                and self.subtitle_rect().contains(pos)
-            ):
+            if hit_kind == "editor_layer":
+                layer = self.editor_layers[hit_index]
+                self.drag_mode = "move_editor_layer"
+                self.start_editor_layer = dict(layer)
+                return
+
+            if hit_kind == "sub":
                 st = self.sub_style
-                self.selected_type = "sub"
-                self.selected_index = -1
                 self.drag_mode = "move_sub"
                 self.start_sub = {
                     "x": float(getattr(st, "x_percent", 50)),
@@ -1113,52 +1109,34 @@ class InteractivePreviewOverlay(QWidget):
                     "w": float(getattr(st, "width_percent", 80)),
                     "font": int(getattr(st, "font_size", 48)),
                 }
-                self.selectionChanged.emit("sub", -1)
-                self.update()
                 return
 
-            if (
-                self.text_enabled
-                and self.overlay_text_rect().contains(pos)
-            ):
-                self.selected_type = "text"
+            if hit_kind == "text":
                 self.drag_mode = "move_text"
                 self.start_text = {
                     "x": self.overlay_x,
                     "y": self.overlay_y,
                     "font": self.overlay_font_size,
                 }
-                self.selectionChanged.emit("text", -1)
-                self.update()
                 return
 
-            if self.logo_enabled and self.logo_rect().contains(pos):
-                self.selected_type = "logo"
+            if hit_kind == "logo":
                 self.drag_mode = "move_logo"
                 self.start_logo = {
                     "x": self.logo_x,
                     "y": self.logo_y,
                     "scale": self.logo_scale,
                 }
-                self.selectionChanged.emit("logo", -1)
-                self.update()
                 return
 
-            if self.blur_enabled:
-                for i in reversed(range(len(self.blur_zones))):
-                    if self.pct_rect(self.blur_zones[i]).contains(pos):
-                        self.selected_type = "blur"
-                        self.selected_index = i
-                        self.drag_mode = "move_blur"
-                        self.start_zone = dict(self.blur_zones[i])
-                        self.selectionChanged.emit("blur", i)
-                        self.update()
-                        return
+            if hit_kind == "blur":
+                self.drag_mode = "move_blur"
+                self.start_zone = dict(self.blur_zones[hit_index])
+                return
 
-            if not self._frame_image.isNull() and self.source_display_rect().contains(pos):
-                self.selected_type = "video"; self.selected_index = -1
+            if hit_kind == "video":
                 self.drag_mode = "move_video"; self.start_video_transform = dict(self.video_transform)
-                self.selectionChanged.emit("video", -1); self.update(); return
+                return
 
             self.selected_type = ""
             self.selected_index = -1
