@@ -25,6 +25,13 @@ def main() -> int:
     assert window.video_editor_tab.parent() is not window.export_tab
     assert window.legacy_preview_panel.parentWidget() is window.video_editor_tab.horizontal_splitter
     assert window.editor_panel.parentWidget() is window.video_editor_tab.vertical_splitter
+    assert window.video_editor_tab.vertical_splitter.count() == 2
+    assert window.video_editor_tab.vertical_splitter.widget(1) is window.editor_panel
+    assert window.editor_panel.minimumHeight() >= 180
+    window.video_editor_tab.restore_sizes({"workspace_vertical": [900, 0]})
+    application.processEvents()
+    assert window.video_editor_tab.vertical_splitter.sizes()[1] >= 180
+    assert window.editor_panel.isVisible()
     for page in ("media", "voice", "subtitle", "text", "blur", "customize", "advanced", "video_clip"):
         assert window.settings_panel.has_page(page)
     for tool in ("voice", "subtitle", "text", "blur", "customize", "advanced"):

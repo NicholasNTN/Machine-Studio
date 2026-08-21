@@ -15,7 +15,7 @@ from editor.blur_zone import BlurZone, source_zone_canvas_rect, resize_normalize
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core.audio_state import AudioState, replace_narration_source, audio_source_is_loadable
-from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes
+from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes, sanitize_workspace_splitter_sizes
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -212,6 +212,20 @@ class EditorDomainTests(unittest.TestCase):
         self.assertTrue(safe_bool(["bad"], True))
         self.assertEqual(safe_str({"bad": True}, "Default"), "Default")
         self.assertEqual(safe_splitter_sizes({"workspace_horizontal": "bad", "workspace_vertical": [None, "x", 300]}), {"workspace_vertical": [0, 0, 300]})
+
+    def test_workspace_splitter_restore_never_collapses_timeline(self):
+        defaults = {"workspace_horizontal": [300, 900, 320], "workspace_vertical": [650, 240]}
+        for malformed in (
+            {},
+            {"workspace_vertical": [900, 0]},
+            {"workspace_vertical": [0, 0]},
+            {"workspace_vertical": [-1, 220]},
+            {"workspace_vertical": ["bad", "values"]},
+            {"workspace_vertical": [900]},
+        ):
+            self.assertEqual(sanitize_workspace_splitter_sizes(malformed), defaults)
+        valid = sanitize_workspace_splitter_sizes({"workspace_horizontal": [300, 1000, 320], "workspace_vertical": [700, 220]})
+        self.assertEqual(valid["workspace_vertical"], [700, 220])
 
     def test_settings_store_startup_scenarios_preserve_files(self):
         scenarios = (

@@ -48,6 +48,18 @@ def safe_splitter_sizes(value):
     return result
 
 
+def sanitize_workspace_splitter_sizes(value, horizontal_default=(300, 900, 320), vertical_default=(650, 240)):
+    """Return usable editor splitter sizes; never restore a collapsed timeline."""
+    safe = safe_splitter_sizes(value)
+    horizontal = safe.get("workspace_horizontal")
+    if not horizontal or len(horizontal) != 3 or any(size <= 0 for size in horizontal):
+        horizontal = list(horizontal_default)
+    vertical = safe.get("workspace_vertical")
+    if not vertical or len(vertical) != 2 or vertical[0] < 300 or vertical[1] < 180:
+        vertical = list(vertical_default)
+    return {"workspace_horizontal": horizontal, "workspace_vertical": vertical}
+
+
 class LastUsedPreferences:
     """Application defaults only; never stores timeline content or media paths."""
     CONTENT_KEYS = {"clips", "editor_clips", "editor_layers", "subtitle", "subtitle_editor_text", "narration_path", "blur_zones", "preview_cues"}

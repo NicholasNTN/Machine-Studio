@@ -1,6 +1,8 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
+from core.last_used_preferences import sanitize_workspace_splitter_sizes
+
 
 class EditorWorkspace(QWidget):
     splitterSizesChanged = Signal()
@@ -23,10 +25,10 @@ class EditorWorkspace(QWidget):
             self._tool_buttons[key] = button
             if index == 0: button.setChecked(True)
         nav_layout.addStretch(1); left_layout.addWidget(nav); left_layout.addWidget(self.page_stack, 1)
-        preview.setMinimumWidth(420); inspector.setMinimumWidth(280); timeline.setMinimumHeight(180)
+        preview.setMinimumWidth(420); inspector.setMinimumWidth(280); timeline.setMinimumHeight(180); self.horizontal_splitter.setMinimumHeight(300)
         self.horizontal_splitter.addWidget(left); self.horizontal_splitter.addWidget(preview); self.horizontal_splitter.addWidget(inspector)
         self.horizontal_splitter.setStretchFactor(1, 1); self.vertical_splitter.addWidget(self.horizontal_splitter); self.vertical_splitter.addWidget(timeline); self.vertical_splitter.setStretchFactor(0, 4); self.vertical_splitter.setStretchFactor(1, 2)
-        self.horizontal_splitter.setSizes([300, 900, 320]); self.vertical_splitter.setSizes([650, 300])
+        self.horizontal_splitter.setSizes([300, 900, 320]); self.vertical_splitter.setSizes([650, 240])
         self.horizontal_splitter.splitterMoved.connect(lambda *_: self.splitterSizesChanged.emit()); self.vertical_splitter.splitterMoved.connect(lambda *_: self.splitterSizesChanged.emit()); root.addWidget(self.vertical_splitter)
 
     def sizes(self): return {"workspace_horizontal": self.horizontal_splitter.sizes(), "workspace_vertical": self.vertical_splitter.sizes()}
@@ -38,6 +40,6 @@ class EditorWorkspace(QWidget):
         self.toolSelected.emit(key)
         return True
     def restore_sizes(self, values):
-        if not isinstance(values, dict): return
-        if values.get("workspace_horizontal"): self.horizontal_splitter.setSizes(values["workspace_horizontal"])
-        if values.get("workspace_vertical"): self.vertical_splitter.setSizes(values["workspace_vertical"])
+        sizes = sanitize_workspace_splitter_sizes(values)
+        self.horizontal_splitter.setSizes(sizes["workspace_horizontal"])
+        self.vertical_splitter.setSizes(sizes["workspace_vertical"])

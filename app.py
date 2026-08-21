@@ -808,6 +808,25 @@ class MainWindow(QMainWindow):
         self.tabs.insertTab(0, self.video_editor_tab, "Video Editor")
         self.tabs.setCurrentIndex(0)
         self._refresh_professional_panels()
+        QTimer.singleShot(0, self._log_timeline_ui)
+
+    def _log_timeline_ui(self, action="startup"):
+        if not hasattr(self, "video_editor_tab") or not hasattr(self, "editor_panel"):
+            return
+        splitter = self.video_editor_tab.vertical_splitter
+        parent = self.editor_panel.parentWidget()
+        details = ["[TIMELINE UI]"]
+        if action != "startup":
+            details.append(f"action={action}")
+        details.extend((
+            f"visible={self.editor_panel.isVisible()}",
+            f"parent={type(parent).__name__ if parent else 'None'}",
+            f"height={self.editor_panel.height()}",
+            f"minimumHeight={self.editor_panel.minimumHeight()}",
+            f"verticalSizes={splitter.sizes()}",
+            f"sequenceCount={len(self.sequence_manager.sequences)}",
+        ))
+        self.log_line(" ".join(details))
 
     def _connect_last_used_preferences(self):
         widgets = (self.editor_layer_font, self.editor_layer_size, self.editor_layer_color,
@@ -2147,6 +2166,7 @@ class MainWindow(QMainWindow):
     def create_clean_sequence(self):
         self.capture_active_sequence(); sequence = self.sequence_manager.create(); sequence.state = self._empty_sequence_state()
         self._sequence_undo_stacks[sequence.id] = QUndoStack(self); self.refresh_sequence_tabs(); self.restore_active_sequence()
+        QTimer.singleShot(0, lambda: self._log_timeline_ui("create"))
 
     def rename_active_sequence(self, name):
         self.sequence_manager.rename(self.sequence_manager.active_sequence_id, name); self.refresh_sequence_tabs()
@@ -2481,21 +2501,16 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(note)
 
-        self.editor_panel.setVisible(False)
+        self.editor_panel.setVisible(True)
         if parent_layout is not None:
             parent_layout.addWidget(self.editor_panel)
 
     def toggle_basic_editor(self, checked):
-        checked = bool(checked)
-        if hasattr(self, "export_vertical_splitter"):
-            sizes = self.export_vertical_splitter.sizes()
-            if not checked and len(sizes) >= 2 and sizes[1] > 20:
-                self.editor_last_splitter_sizes = list(sizes)
-
-        self.editor_panel.setVisible(checked)
-        self.editor_toggle_btn.setText(
-            "✂ Ẩn Editor" if checked else "✂ Video Editor"
-        )
+        # Timeline now belongs exclusively to Video Editor and cannot be hidden
+        # by the legacy Export-era editor toggle.
+        checked = True
+        self.editor_panel.setVisible(True)
+        self.editor_toggle_btn.setText("✂ Ẩn Editor")
 
         if checked and not self.editor_clips:
             current = self.current_video()
@@ -2504,13 +2519,6 @@ class MainWindow(QMainWindow):
 
         # QSplitter recalculates geometry after the visibility change. This fixes
         # the old bug where hiding Editor left the Preview spilling below its area.
-        if hasattr(self, "export_vertical_splitter"):
-            if checked:
-                restore = self.editor_last_splitter_sizes or [760, 300]
-                QTimer.singleShot(0, lambda r=restore: self.export_vertical_splitter.setSizes(r))
-            else:
-                QTimer.singleShot(0, lambda: self.export_vertical_splitter.setSizes([1000, 0]))
-
         self.editor_refresh_all()
         QTimer.singleShot(0, self.export_tab.updateGeometry)
 
@@ -7814,7 +7822,7 @@ class MainWindow(QMainWindow):
             self.right_panel_btn.blockSignals(False)
             self.export_right_panel.setVisible(right_visible)
 
-        editor_visible = bool(data.get("editor_visible", False))
+        editor_visible = True
         if hasattr(self, "editor_toggle_btn"):
             self.editor_toggle_btn.blockSignals(True)
             self.editor_toggle_btn.setChecked(editor_visible)
@@ -7822,7 +7830,7 @@ class MainWindow(QMainWindow):
             self.editor_toggle_btn.setText(
                 "✂ Ẩn Editor" if editor_visible else "✂ Video Editor"
             )
-            self.editor_panel.setVisible(editor_visible)
+            self.editor_panel.setVisible(True)
 
         body_sizes = data.get("export_body_sizes")
         vertical_sizes = data.get("export_vertical_sizes")
