@@ -24,7 +24,7 @@ class BasicTimelineWidget(QWidget):
         self.clips: list[dict] = []
         self.timeline_items = []
         self.tracks = []
-        self.zoom = 24.0
+        self.zoom = 14.0
         self.selected_index = -1
         self.selected_item_id = ""
         self.playhead = 0.0
@@ -71,7 +71,7 @@ class BasicTimelineWidget(QWidget):
         self.update()
 
     def _update_width(self):
-        duration = max(
+        duration = max(70.0,
             editor_engine.total_duration(self.clips),
             max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0),
         )
@@ -106,7 +106,7 @@ class BasicTimelineWidget(QWidget):
         return []
 
     def _time_at_x(self, x):
-        total = max(editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
+        total = max(70.0, editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
         return max(
             0.0,
             min(total, (float(x) - self.HEADER_WIDTH) / max(0.1, self.zoom)),
@@ -141,8 +141,8 @@ class BasicTimelineWidget(QWidget):
 
         # ruler
         p.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 110), 1))
-        total = max(editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
-        major = 5.0 if self.zoom < 18 else 2.0 if self.zoom < 45 else 1.0
+        total = max(70.0, editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
+        major = 5.0 if self.zoom < 10 else 2.0 if self.zoom < 45 else 1.0
         t = 0.0
         while t <= total + major:
             x = self.HEADER_WIDTH + t * self.zoom
