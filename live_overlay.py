@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from core.subtitle_sizing import preview_font_pixels
 from editor.canvas import calculate_media_rect
+from editor.blur_zone import BlurZone, source_zone_canvas_rect
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import (
@@ -359,23 +360,18 @@ class InteractivePreviewOverlay(QWidget):
         return QRectF(cx - width / 2, cy - height / 2, width, height)
 
     def pct_rect(self, zone: dict) -> QRectF:
-        vr = self.video_rect()
-        x = vr.left() + vr.width() * float(zone.get("x", 0)) / 100
-        y = vr.top() + vr.height() * float(zone.get("y", 0)) / 100
-        w = vr.width() * float(zone.get("w", 100)) / 100
-        h = vr.height() * float(zone.get("h", 20)) / 100
-        return QRectF(x, y, w, h)
+        canvas = self.video_rect()
+        mapped = source_zone_canvas_rect(zone, self._frame_image.width(), self._frame_image.height(), self.output_width, self.output_height, self.video_transform)
+        sx, sy = canvas.width() / self.output_width, canvas.height() / self.output_height
+        return QRectF(canvas.left() + mapped.x*sx, canvas.top() + mapped.y*sy, mapped.width*sx, mapped.height*sy)
 
     def source_zone_rect(self, zone: dict) -> QRectF:
         src = self.source_crop_rect()
         if src.isNull():
             return QRectF()
-        return QRectF(
-            src.left() + src.width() * float(zone.get("x", 0)) / 100,
-            src.top() + src.height() * float(zone.get("y", 0)) / 100,
-            src.width() * float(zone.get("w", 100)) / 100,
-            src.height() * float(zone.get("h", 20)) / 100,
-        )
+        z = BlurZone.from_dict(zone)
+        return QRectF(src.left() + src.width()*z.x, src.top() + src.height()*z.y,
+                      src.width()*z.width, src.height()*z.height)
 
     def subtitle_rect(self) -> QRectF:
         vr = self.video_rect()

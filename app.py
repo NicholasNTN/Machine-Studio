@@ -54,6 +54,7 @@ from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
+from editor.blur_zone import BlurZone
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
@@ -5442,7 +5443,15 @@ class MainWindow(QMainWindow):
             zone = {"x": 68.0, "y": 8.0, "w": 26.0, "h": 14.0, "auto": False}
 
         try:
+            if isinstance(zone, dict) and ("width" in zone or "height" in zone):
+                canonical = BlurZone.from_dict(zone)
+                zone = {"id": canonical.id, "coordinate_space": canonical.coordinate_space,
+                        "x": canonical.x * 100, "y": canonical.y * 100,
+                        "w": canonical.width * 100, "h": canonical.height * 100,
+                        "auto": bool(zone.get("auto", False))}
             value = {
+                "id": BlurZone.from_dict(zone).id,
+                "coordinate_space": "source_video",
                 "x": float(zone.get("x", 68.0)),
                 "y": float(zone.get("y", 8.0)),
                 "w": float(zone.get("w", 26.0)),
@@ -5543,7 +5552,9 @@ class MainWindow(QMainWindow):
             zone = dict(self.blur_zone_list.item(i).data(Qt.UserRole) or {})
             if not zone.get("auto"):
                 zone.pop("_list_row", None)
-                result.append(zone)
+                canonical = BlurZone.from_dict(zone).to_dict()
+                canonical["auto"] = False
+                result.append(canonical)
         return result
 
     def auto_subtitle_zone(self):
@@ -5552,7 +5563,9 @@ class MainWindow(QMainWindow):
             return {}
         zone = dict(self.blur_zone_list.item(row).data(Qt.UserRole) or {})
         zone.pop("_list_row", None)
-        return zone
+        canonical = BlurZone.from_dict(zone).to_dict()
+        canonical["auto"] = True
+        return canonical
 
     def all_live_blur_zones(self):
         zones = []

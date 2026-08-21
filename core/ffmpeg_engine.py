@@ -11,6 +11,7 @@ import re
 
 from .models import Scene, ExportOptions
 from . import subtitle_engine
+from editor.blur_zone import source_zone_canvas_rect
 
 
 class FFmpegError(RuntimeError):
@@ -516,10 +517,11 @@ def export_video(
     target = parse_resolution(options.resolution)
     out_w = target[0] if target else max(2, info.get("width") or 1920)
     out_h = target[1] if target else max(2, info.get("height") or 1080)
+    transform = dict(getattr(options, "video_transform", {}) or {})
+    transform.setdefault("fit_mode", options.fit_mode)
 
     if target:
         w, h = target
-        transform = dict(getattr(options, "video_transform", {}) or {})
         transform_fit = str(transform.get("fit_mode", options.fit_mode)).lower()
         fit_rule = "increase" if transform_fit == "fill" else "decrease"
         sx = max(0.01, float(transform.get("scale_x", 100)) / 100.0); sy = max(0.01, float(transform.get("scale_y", 100)) / 100.0)
@@ -634,10 +636,12 @@ def export_video(
                 x = int(z["x_px"]); y = int(z["y_px"])
                 zw = int(z["w_px"]); zh = int(z["h_px"])
             else:
-                x = max(0, round(out_w * float(z.get("x", 0)) / 100))
-                y = max(0, round(out_h * float(z.get("y", 0)) / 100))
-                zw = max(2, round(out_w * float(z.get("w", 100)) / 100))
-                zh = max(2, round(out_h * float(z.get("h", 20)) / 100))
+                mapped = source_zone_canvas_rect(
+                    z, info.get("width") or out_w, info.get("height") or out_h,
+                    out_w, out_h, transform,
+                )
+                x, y = max(0, round(mapped.x)), max(0, round(mapped.y))
+                zw, zh = max(2, round(mapped.width)), max(2, round(mapped.height))
                 zw = min(zw, max(2, out_w - x))
                 zh = min(zh, max(2, out_h - y))
 

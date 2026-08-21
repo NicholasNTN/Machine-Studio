@@ -8,6 +8,7 @@ from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
 from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle, subtitle_group_is_visible
 from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
+from editor.blur_zone import BlurZone, source_zone_canvas_rect
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core import subtitle_engine
@@ -114,6 +115,22 @@ class EditorDomainTests(unittest.TestCase):
         legacy_track_visible = False
         self.assertFalse(legacy_track_visible)
         self.assertTrue(subtitle_group_is_visible(True, group))
+
+    def test_source_normalized_blur_mapping_across_canvas_ratios(self):
+        zone = BlurZone("lower-third", x=.12, y=.73, width=.75, height=.16)
+        cases = ((1080, 1920, 1920, 1080), (1920, 1080, 1080, 1920), (1080, 1350, 1080, 1920))
+        for sw, sh, cw, ch in cases:
+            video = calculate_fit_rect(sw, sh, cw, ch)
+            rect = source_zone_canvas_rect(zone, sw, sh, cw, ch, {"fit_mode": "fit"})
+            self.assertAlmostEqual((rect.x - video.x) / video.width, zone.x, places=6)
+            self.assertAlmostEqual((rect.y - video.y) / video.height, zone.y, places=6)
+            self.assertAlmostEqual(rect.width / video.width, zone.width, places=6)
+            self.assertAlmostEqual(rect.height / video.height, zone.height, places=6)
+
+    def test_legacy_blur_percentages_upgrade_to_source_coordinates(self):
+        zone = BlurZone.from_dict({"x": 12, "y": 73, "w": 75, "h": 16})
+        self.assertEqual(zone.coordinate_space, "source_video")
+        self.assertAlmostEqual(zone.width, .75)
 
 
 if __name__ == "__main__":
