@@ -16,6 +16,7 @@ from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
 from editor.preview_binding import PreviewBinding, binding_after_clip_change
+from editor.sequence_manager import SequenceManager
 from core.ai_styles import AI_STYLES, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 
@@ -157,6 +158,19 @@ class EditorDomainTests(unittest.TestCase):
     def test_preview_binding_clears_after_last_clip_deletion(self):
         current = PreviewBinding("video.mp4", 12.0, 4.0, True)
         self.assertEqual(binding_after_clip_change([], current), PreviewBinding(None, 0.0, 0.0, False))
+
+    def test_multi_sequence_content_and_undo_are_isolated(self):
+        manager = SequenceManager(); first = manager.active
+        first.state = {"editor_clips": [{"path": "a.mp4"}], "subtitle": "A"}; first.undo_history.append("A edit")
+        second = manager.create(); second.state["editor_clips"] = [{"path": "b.mp4"}]; second.undo_history.append("B edit")
+        self.assertEqual(first.state["editor_clips"][0]["path"], "a.mp4")
+        self.assertEqual(first.undo_history, ["A edit"]); self.assertEqual(second.undo_history, ["B edit"])
+
+    def test_legacy_project_migrates_to_timeline_one_and_persists_active(self):
+        manager = SequenceManager.from_dict({}, {"editor_clips": [{"path": "old.mp4"}]})
+        self.assertEqual(manager.active.name, "Timeline 1")
+        restored = SequenceManager.from_dict(manager.to_dict())
+        self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
 
 
 if __name__ == "__main__":
