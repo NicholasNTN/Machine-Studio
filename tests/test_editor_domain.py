@@ -173,7 +173,7 @@ class EditorDomainTests(unittest.TestCase):
 
     def test_legacy_project_migrates_to_timeline_one_and_persists_active(self):
         manager = SequenceManager.from_dict({}, {"editor_clips": [{"path": "old.mp4"}]})
-        self.assertEqual(manager.active.name, "Timeline 1")
+        self.assertEqual(manager.active.name, "Timeline")
         restored = SequenceManager.from_dict(manager.to_dict())
         self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
 
@@ -245,13 +245,26 @@ class EditorDomainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "project.json"; project.save(path); restored = AIProject.load(path)
         self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
-        self.assertEqual([item["name"] for item in restored.sequences], ["Timeline 1", "Timeline 2"])
+        self.assertEqual([item["name"] for item in restored.sequences], ["Timeline", "Timeline 2"])
 
-    def test_sequence_tab_refresh_uses_supported_qtabbar_api(self):
+    def test_sequence_names_are_stable_and_use_next_available_number(self):
+        manager = SequenceManager()
+        self.assertEqual(manager.active.name, "Timeline")
+        first = manager.create(); second = manager.create()
+        self.assertEqual([item.name for item in manager.sequences], ["Timeline", "Timeline 1", "Timeline 2"])
+        manager.close(first.id)
+        third = manager.create()
+        self.assertEqual(third.name, "Timeline 3")
+        self.assertEqual([item.name for item in manager.sequences], ["Timeline", "Timeline 2", "Timeline 3"])
+
+    def test_integrated_sequence_strip_replaces_fake_qtabbar(self):
         source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
-        self.assertNotIn("sequence_tabs.clear()", source)
-        self.assertIn("sequence_tabs.removeTab", source)
-        self.assertIn("self.sequence_tabs.blockSignals(signals_were_blocked)", source)
+        strip_source = (Path(__file__).resolve().parents[1] / "ui" / "sequence_tab_strip.py").read_text(encoding="utf-8")
+        self.assertNotIn("self.sequence_tabs = QTabBar", source)
+        self.assertNotIn('addTab("+")', source)
+        self.assertIn("self.sequence_strip = SequenceTabStrip()", source)
+        self.assertIn("class SequenceTabButton", strip_source)
+        self.assertIn("self.close_button.setVisible(False)", strip_source)
 
 
 if __name__ == "__main__":

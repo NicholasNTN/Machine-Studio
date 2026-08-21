@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from uuid import uuid4
+import re
 
 
 @dataclass
@@ -30,14 +31,20 @@ class SequenceManager:
     """Owns independent editing documents; UI/runtime bind only to active."""
 
     def __init__(self, sequences=None, active_sequence_id=""):
-        self.sequences = list(sequences or [SequenceDocument(uuid4().hex, "Timeline 1")])
+        self.sequences = list(sequences or [SequenceDocument(uuid4().hex, "Timeline")])
         self.active_sequence_id = active_sequence_id if any(s.id == active_sequence_id for s in self.sequences) else self.sequences[0].id
 
     @property
     def active(self): return next(s for s in self.sequences if s.id == self.active_sequence_id)
 
     def create(self, name=""):
-        sequence = SequenceDocument(uuid4().hex, name or f"Timeline {len(self.sequences)+1}")
+        used_numbers = []
+        for existing in self.sequences:
+            match = re.fullmatch(r"Timeline (\d+)", existing.name)
+            if match:
+                used_numbers.append(int(match.group(1)))
+        generated_name = f"Timeline {max(used_numbers, default=0) + 1}"
+        sequence = SequenceDocument(uuid4().hex, name or generated_name)
         self.sequences.append(sequence); self.active_sequence_id = sequence.id; return sequence
 
     def activate(self, sequence_id):
@@ -56,7 +63,7 @@ class SequenceManager:
 
     def close(self, sequence_id):
         self.sequences[:] = [s for s in self.sequences if s.id != sequence_id]
-        if not self.sequences: self.sequences.append(SequenceDocument(uuid4().hex, "Timeline 1"))
+        if not self.sequences: self.sequences.append(SequenceDocument(uuid4().hex, "Timeline"))
         if not any(s.id == self.active_sequence_id for s in self.sequences): self.active_sequence_id = self.sequences[0].id
         return self.active
 
@@ -67,5 +74,5 @@ class SequenceManager:
         data = dict(value or {})
         if data.get("sequences"):
             return cls([SequenceDocument.from_dict(s) for s in data["sequences"]], str(data.get("active_sequence_id", "")))
-        first = SequenceDocument(uuid4().hex, "Timeline 1", deepcopy(legacy_state or {}), deepcopy(legacy_project or {}))
+        first = SequenceDocument(uuid4().hex, "Timeline", deepcopy(legacy_state or {}), deepcopy(legacy_project or {}))
         return cls([first], first.id)

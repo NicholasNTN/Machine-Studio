@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QPlainTextEdit, QProgressBar, QTableWidget,
     QTableWidgetItem, QHeaderView, QSplitter, QScrollArea, QFormLayout,
     QAbstractItemView, QDialog, QDialogButtonBox, QFontComboBox, QColorDialog,
-    QSlider, QFrame, QInputDialog, QRadioButton, QButtonGroup, QTabBar, QMenu
+    QSlider, QFrame, QInputDialog, QRadioButton, QButtonGroup, QMenu
 )
 
 from core.models import AIProject, ExportOptions, SubtitleStyle, Scene
@@ -49,6 +49,7 @@ from ui.tool_panels import ActionListPanel
 from ui.settings_panel import SettingsPanel
 from ui.export_dialog import ExportDialog, sanitize_windows_name
 from ui.task_progress import TaskProgress
+from ui.sequence_tab_strip import SequenceTabStrip
 from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
 from services.playback_controller import PlaybackController
@@ -802,7 +803,7 @@ class MainWindow(QMainWindow):
         self.video_editor_tab.toolSelected.connect(self.settings_panel.set_page)
         self.video_editor_tab.splitterSizesChanged.connect(self.schedule_autosave)
         self.editor_panel.setVisible(True)
-        self.editor_panel.setTitle("Timeline")
+        self.editor_panel.setTitle("")
         self.left_panel_btn.hide(); self.right_panel_btn.hide(); self.editor_toggle_btn.hide()
         self.tabs.insertTab(0, self.video_editor_tab, "Video Editor")
         self.tabs.setCurrentIndex(0)
@@ -2088,7 +2089,7 @@ class MainWindow(QMainWindow):
         project.scenes = scenes; return project
 
     def capture_active_sequence(self):
-        if self._switching_sequence or not hasattr(self, "sequence_tabs"): return
+        if self._switching_sequence or not hasattr(self, "sequence_strip"): return
         sequence = self.sequence_manager.active
         self.capture_project_state(sequence_capture=False)
         state = self.export_state_dict()
@@ -2131,38 +2132,17 @@ class MainWindow(QMainWindow):
         finally:
             self._restoring_state = False; self._switching_sequence = False
 
-    def _clear_sequence_tabs(self):
-        """QTabBar has removeTab(), but unlike QTabWidget it has no clear()."""
-        while self.sequence_tabs.count() > 0:
-            self.sequence_tabs.removeTab(self.sequence_tabs.count() - 1)
-
     def refresh_sequence_tabs(self):
-        if not hasattr(self, "sequence_tabs"):
-            return
-        signals_were_blocked = self.sequence_tabs.blockSignals(True)
-        try:
-            self._clear_sequence_tabs()
-            active_index = 0
-            for sequence in self.sequence_manager.sequences:
-                tab_index = self.sequence_tabs.addTab(sequence.name)
-                self.sequence_tabs.setTabData(tab_index, sequence.id)
-                if sequence.id == self.sequence_manager.active_sequence_id:
-                    active_index = tab_index
-            plus_index = self.sequence_tabs.addTab("+")
-            self.sequence_tabs.setTabData(plus_index, "__new__")
-            # Styles may place close buttons on either side; the pseudo-tab has neither.
-            self.sequence_tabs.setTabButton(plus_index, QTabBar.LeftSide, None)
-            self.sequence_tabs.setTabButton(plus_index, QTabBar.RightSide, None)
-            self.sequence_tabs.setCurrentIndex(active_index)
-        finally:
-            self.sequence_tabs.blockSignals(signals_were_blocked)
+        if hasattr(self, "sequence_strip"):
+            self.sequence_strip.set_sequences(
+                self.sequence_manager.sequences, self.sequence_manager.active_sequence_id
+            )
 
-    def _sequence_tab_changed(self, index):
-        if self._switching_sequence or index < 0: return
-        sequence_id = self.sequence_tabs.tabData(index)
-        if sequence_id == "__new__": self.create_clean_sequence(); return
+    def _sequence_tab_changed(self, sequence_id):
+        if self._switching_sequence: return
         if not sequence_id or sequence_id == self.sequence_manager.active_sequence_id: return
         self.capture_active_sequence(); self.sequence_manager.activate(sequence_id); self.restore_active_sequence()
+        self.refresh_sequence_tabs()
 
     def create_clean_sequence(self):
         self.capture_active_sequence(); sequence = self.sequence_manager.create(); sequence.state = self._empty_sequence_state()
@@ -2175,41 +2155,40 @@ class MainWindow(QMainWindow):
         self.capture_active_sequence(); copy = self.sequence_manager.duplicate(sequence_id or self.sequence_manager.active_sequence_id)
         self._sequence_undo_stacks[copy.id] = QUndoStack(self); self.refresh_sequence_tabs(); self.restore_active_sequence(); return copy
 
-    def close_sequence_at(self, index):
-        sequence_id = self.sequence_tabs.tabData(index)
-        if not sequence_id or sequence_id == "__new__": return
+    def close_sequence(self, sequence_id):
+        if not sequence_id or len(self.sequence_manager.sequences) <= 1: return
         sequence = next(s for s in self.sequence_manager.sequences if s.id == sequence_id)
         if sequence.dirty and QMessageBox.question(self, "Đóng Timeline", f"Đóng {sequence.name} và bỏ trạng thái chưa lưu?", QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes: return
         self.sequence_manager.close(sequence_id); self._sequence_undo_stacks.pop(sequence_id, None); self.refresh_sequence_tabs(); self.restore_active_sequence()
 
-    def _sequence_tab_menu(self, pos):
-        index = self.sequence_tabs.tabAt(pos); sequence_id = self.sequence_tabs.tabData(index)
-        if not sequence_id or sequence_id == "__new__": return
+    def _sequence_tab_menu(self, sequence_id, global_pos):
+        if not sequence_id: return
         menu = QMenu(self); rename = menu.addAction("Rename"); duplicate = menu.addAction("Duplicate"); menu.addSeparator(); close = menu.addAction("Close"); close_others = menu.addAction("Close Others")
-        chosen = menu.exec(self.sequence_tabs.mapToGlobal(pos))
+        close.setEnabled(len(self.sequence_manager.sequences) > 1)
+        close_others.setEnabled(len(self.sequence_manager.sequences) > 1)
+        chosen = menu.exec(global_pos)
         if chosen == rename:
             sequence = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); name, ok = QInputDialog.getText(self, "Rename Timeline", "Name", text=sequence.name)
             if ok and name.strip(): self.sequence_manager.rename(sequence_id, name); self.refresh_sequence_tabs()
         elif chosen == duplicate:
             self.duplicate_sequence(sequence_id)
-        elif chosen == close: self.close_sequence_at(index)
+        elif chosen == close: self.close_sequence(sequence_id)
         elif chosen == close_others:
             self.capture_active_sequence(); keep = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); self.sequence_manager.sequences[:] = [keep]; self.sequence_manager.active_sequence_id = keep.id; self.refresh_sequence_tabs(); self.restore_active_sequence()
 
     def _build_basic_editor_panel(self, parent_layout):
-        self.editor_panel = QGroupBox("✂ Basic Video Editor")
+        self.editor_panel = QGroupBox("")
+        self.editor_panel.setObjectName("timelinePanel")
         self.editor_panel.setMinimumHeight(130)
         layout = QVBoxLayout(self.editor_panel)
         layout.setSpacing(5)
 
-        self.sequence_tabs = QTabBar()
-        self.sequence_tabs.setTabsClosable(True)
-        self.sequence_tabs.setMovable(True)
-        self.sequence_tabs.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.sequence_tabs.currentChanged.connect(self._sequence_tab_changed)
-        self.sequence_tabs.tabCloseRequested.connect(self.close_sequence_at)
-        self.sequence_tabs.customContextMenuRequested.connect(self._sequence_tab_menu)
-        layout.addWidget(self.sequence_tabs)
+        self.sequence_strip = SequenceTabStrip()
+        self.sequence_strip.sequenceActivated.connect(self._sequence_tab_changed)
+        self.sequence_strip.newSequenceRequested.connect(self.create_clean_sequence)
+        self.sequence_strip.closeSequenceRequested.connect(self.close_sequence)
+        self.sequence_strip.contextMenuRequested.connect(self._sequence_tab_menu)
+        layout.addWidget(self.sequence_strip)
         self.refresh_sequence_tabs()
 
         header = QHBoxLayout()
@@ -4188,6 +4167,22 @@ class MainWindow(QMainWindow):
                 border:1px solid #40516c; border-radius:5px;
                 margin-top:10px; padding-top:12px; font-weight:650;
             }
+            QGroupBox#timelinePanel {
+                margin-top:0; padding-top:4px;
+            }
+            QWidget#sequenceTabButton {
+                background:transparent; border-radius:3px;
+            }
+            QWidget#sequenceTabButton[active="true"] {
+                background:#243650; border-bottom:2px solid #22a7ea;
+            }
+            QWidget#sequenceTabButton:hover { background:#1b2b43; }
+            QToolButton#sequenceTabClose, QToolButton#sequenceTabPlus {
+                background:transparent; color:#dce8f7; border:0; padding:0;
+                font-weight:650;
+            }
+            QToolButton#sequenceTabClose:hover { color:#ffffff; background:#9b3340; border-radius:8px; }
+            QToolButton#sequenceTabPlus:hover { color:#55c5ff; background:#1b2b43; border-radius:3px; }
             QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox,
             QListWidget, QTableWidget, QFontComboBox {
                 background:#121f32; color:#f4f7fb;

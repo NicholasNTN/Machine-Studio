@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QTabBar
+from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPixmap
 from app import MainWindow
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS
@@ -52,18 +52,21 @@ def main() -> int:
     assert window.narration_player.audioOutput() is window.narration_output
     assert len(window.sequence_manager.sequences) == 1
     window.refresh_sequence_tabs()
-    assert window.sequence_tabs.count() == 2
-    assert window.sequence_tabs.tabData(window.sequence_tabs.count() - 1) == "__new__"
+    assert [button.name_label.text() for button in window.sequence_strip.tab_buttons()] == ["Timeline"]
+    assert not window.sequence_strip.tab_buttons()[0]._closable
     first_id = window.sequence_manager.active.id
     window.create_clean_sequence()
     assert len(window.sequence_manager.sequences) == 2
     window.refresh_sequence_tabs()
-    assert window.sequence_tabs.count() == 3
-    plus_index = window.sequence_tabs.count() - 1
-    assert window.sequence_tabs.tabButton(plus_index, QTabBar.LeftSide) is None
-    assert window.sequence_tabs.tabButton(plus_index, QTabBar.RightSide) is None
+    assert [button.name_label.text() for button in window.sequence_strip.tab_buttons()] == ["Timeline", "Timeline 1"]
+    assert all(button._closable for button in window.sequence_strip.tab_buttons())
+    assert window.sequence_strip.plus_button.text() == "+"
     assert window.sequence_manager.active.id != first_id
     assert window.editor_clips == [] and window.preview_loaded_path == ""
+    window.create_clean_sequence()
+    assert [button.name_label.text() for button in window.sequence_strip.tab_buttons()] == ["Timeline", "Timeline 1", "Timeline 2"]
+    window._sequence_tab_changed(first_id)
+    assert window.sequence_manager.active.id == first_id
     window.rename_active_sequence("Timeline Smoke")
     duplicate = window.duplicate_sequence()
     assert duplicate.name.endswith("Copy")
