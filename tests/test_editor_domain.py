@@ -18,6 +18,7 @@ from core.audio_state import AudioState, replace_narration_source, audio_source_
 from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes, sanitize_workspace_splitter_sizes
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
+from core.media_library import migrate_global_media_library
 from editor.layer_order import CANONICAL_LAYER_ORDER
 from editor.preview_binding import PreviewBinding, binding_after_clip_change
 from editor.sequence_manager import SequenceManager
@@ -260,6 +261,21 @@ class EditorDomainTests(unittest.TestCase):
             path = Path(folder) / "project.json"; project.save(path); restored = AIProject.load(path)
         self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
         self.assertEqual([item["name"] for item in restored.sequences], ["Timeline", "Timeline 2"])
+
+    def test_media_library_is_global_and_migrates_legacy_sequence_media(self):
+        manager = SequenceManager(); first = manager.active; second = manager.create()
+        first.state.update({"media_bin": ["A.mp4", "shared.mp4"], "media_display_names": {"A.mp4": "Machine A"}})
+        second.state.update({"media_bin": ["B.mp4", "shared.mp4"], "media_display_names": {"B.mp4": "Machine B"}})
+        media, names = migrate_global_media_library(["root.mp4"], {"root.mp4": "Root"}, manager.sequences)
+        self.assertEqual(media, ["root.mp4", "A.mp4", "shared.mp4", "B.mp4"])
+        self.assertEqual(names, {"root.mp4": "Root", "A.mp4": "Machine A", "B.mp4": "Machine B"})
+        for sequence in manager.sequences:
+            sequence.state.pop("media_bin", None); sequence.state.pop("media_display_names", None)
+        project = AIProject(media_library=media, media_display_names=names, active_sequence_id=manager.active_sequence_id, sequences=manager.to_dict()["sequences"])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "media-project.json"; project.save(path); restored = AIProject.load(path)
+        self.assertEqual(restored.media_library, media)
+        self.assertNotIn("media_bin", restored.sequences[0]["state"])
 
     def test_sequence_auto_names_compact_without_changing_ids(self):
         manager = SequenceManager()

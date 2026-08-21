@@ -64,6 +64,7 @@ from core.audio_state import AudioState, replace_narration_source
 from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
+from core.media_library import migrate_global_media_library
 
 
 APP_NAME = "Machine Studio"
@@ -2099,7 +2100,10 @@ class MainWindow(QMainWindow):
     def redo_active_sequence(self): self.editor_document.commands.stack.redo()
 
     def _project_payload(self):
-        payload = asdict(self.project); payload.pop("sequences", None); payload.pop("active_sequence_id", None); return payload
+        payload = asdict(self.project)
+        for key in ("sequences", "active_sequence_id", "media_library", "media_display_names"):
+            payload.pop(key, None)
+        return payload
 
     def _project_from_payload(self, payload):
         data = deepcopy(payload or {}); scenes = [Scene(**item) for item in data.pop("scenes", [])]
@@ -2113,8 +2117,7 @@ class MainWindow(QMainWindow):
         self.capture_project_state(sequence_capture=False)
         state = self.export_state_dict()
         state.update({"preview_cues": list(self.preview_cues), "subtitle_editor_text": self.sub_editor.toPlainText(),
-                      "subtitle_path": self.sub_path.text().strip(), "narration_path": self.narration_path,
-                      "media_bin": list(self.queue), "media_display_names": dict(self.media_panel._display_names)})
+                      "subtitle_path": self.sub_path.text().strip(), "narration_path": self.narration_path})
         sequence.state = deepcopy(state); sequence.ai_project = self._project_payload()
         sequence.playhead = self.editor_current_time(); sequence.dirty = bool(self.editor_clips or self.editor_layers or self.preview_cues or self.narration_path)
 
@@ -2123,7 +2126,7 @@ class MainWindow(QMainWindow):
                 "subtitle_group_id": "", "preview_cues": [], "subtitle_editor_text": "", "subtitle_path": "",
                 "narration_path": "", "sub_enabled": False, "blur_enabled": False, "auto_cover_source_subtitle": False,
                 "logo_enabled": False, "logo_path": "", "overlay_enabled": False, "overlay_text": "", "music_file": "",
-                "editor_use_timeline": True, "media_bin": list(self.queue), "media_display_names": {}}
+                "editor_use_timeline": True}
 
     def restore_active_sequence(self):
         sequence = self.sequence_manager.active; self._switching_sequence = True; self._restoring_state = True
@@ -2138,7 +2141,7 @@ class MainWindow(QMainWindow):
             self.preview_cues = [tuple(cue) for cue in state.get("preview_cues", [])]
             self.sub_editor.setPlainText(str(state.get("subtitle_editor_text", "")))
             self.sub_path.setText(str(state.get("subtitle_path", ""))); self.narration_path = str(state.get("narration_path", "")); self.voice_file.setText(self.narration_path)
-            self.queue = list(state.get("media_bin", self.queue)); self.media_panel._display_names = dict(state.get("media_display_names", {})); self._refresh_professional_panels()
+            self._refresh_professional_panels()
             self.ai_video_path.setText(self.project.video_path); self.ai_summary.setPlainText(self.project.analysis_summary); self.transcript.setPlainText(self.project.transcript); self.refresh_scene_table()
             self.editor_document.commands.stack = self._sequence_undo_stacks.setdefault(sequence.id, QUndoStack(self))
             self.editor_refresh_all()
@@ -4594,6 +4597,8 @@ class MainWindow(QMainWindow):
             packed = self.sequence_manager.to_dict()
             self.project.active_sequence_id = packed["active_sequence_id"]
             self.project.sequences = packed["sequences"]
+            self.project.media_library = list(self.queue)
+            self.project.media_display_names = dict(self.media_panel._display_names)
 
     def autosave_project(self):
         path = self.project_autosave_path()
@@ -4645,6 +4650,17 @@ class MainWindow(QMainWindow):
             self.project = project
             packed = {"active_sequence_id": project.active_sequence_id, "sequences": project.sequences}
             self.sequence_manager = SequenceManager.from_dict(packed, project.export_state, self._project_payload())
+            self.queue, media_names = migrate_global_media_library(
+                project.media_library, project.media_display_names, self.sequence_manager.sequences
+            )
+            for sequence in self.sequence_manager.sequences:
+                sequence.state.pop("media_bin", None)
+                sequence.state.pop("media_display_names", None)
+            self.media_panel._display_names = media_names
+            self.queue_list.clear()
+            for media_path in self.queue:
+                self.queue_list.addItem(QListWidgetItem(Path(media_path).name))
+            self._refresh_professional_panels()
             self._sequence_undo_stacks = {sequence.id: QUndoStack(self) for sequence in self.sequence_manager.sequences}
             self.refresh_sequence_tabs()
             if project.sequences:

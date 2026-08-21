@@ -48,6 +48,8 @@ class AIProject:
     scenes: list[Scene] = field(default_factory=list)
     active_sequence_id: str = ""
     sequences: list[dict] = field(default_factory=list)
+    media_library: list[str] = field(default_factory=list)
+    media_display_names: dict[str, str] = field(default_factory=dict)
 
     def save(self, path: str | Path):
         Path(path).write_text(
