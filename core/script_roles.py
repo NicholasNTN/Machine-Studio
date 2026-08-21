@@ -29,7 +29,9 @@ def assign_role(display_name: str, index: int, total: int, supplied: str = "") -
     if not roles: return "single"
     valid = {roles[0][0], roles[1][0]}
     if supplied in valid: return supplied
-    return roles[0][0] if int(index) < max(1, int(total) // 2) else roles[1][0]
+    # Generation requests should supply semantic metadata. Missing metadata is
+    # deliberately conservative until SpeakerRoleService analyzes the script.
+    return roles[0][0] if int(index) == 0 else roles[1][0]
 
 
 def voice_for_role(role: str, voice_a: str, voice_b: str, display_name: str) -> str:

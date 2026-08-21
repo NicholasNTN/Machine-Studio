@@ -445,6 +445,12 @@ Rules:
     return scenes
 
 
+def classify_speaker_roles(api_key: str, model: str, prompt: str):
+    c = _client(api_key)
+    response = _call(lambda: c.interactions.create(model=model, input=prompt, store=False))
+    return _json_array(response.output_text)
+
+
 def _write_wav(path: str, pcm: bytes, rate: int = 24000):
     with wave.open(path, "wb") as wf:
         wf.setnchannels(1)

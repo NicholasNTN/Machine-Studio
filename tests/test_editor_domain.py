@@ -14,6 +14,7 @@ from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
 from core.ai_styles import AI_STYLES, grouped_styles
+from core.speaker_role_service import analyze_speaker_roles
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -44,10 +45,20 @@ class EditorDomainTests(unittest.TestCase):
         self.assertTrue(all(subtitle_engine.preset_category(name) for name in subtitle_engine.list_presets()))
 
     def test_dual_voice_role_assignment(self):
-        roles = [assign_role("Before and after", index, 4) for index in range(4)]
+        segments = [{"id": str(i), "text": text} for i, text in enumerate(("The old machine was rusted.", "Its output was slow.", "After the rebuild, production doubled.", "Now the line runs cleanly."))]
+        roles = [item["speaker_role"] for item in analyze_speaker_roles(segments, "before_after")]
         self.assertEqual(roles, ["before", "before", "after", "after"])
         self.assertEqual(voice_for_role("after", "A", "B", "Before and after"), "B")
         self.assertEqual(voice_for_role("single", "A", "B", "Factory documentary"), "A")
+
+    def test_mystery_roles_keep_explainer_rhetorical_question(self):
+        texts = ["What colossal titan lurks here?", "Meet the largest land machine.", "Its wheel cuts through rock.", "Conveyors move earth.", "It works without stopping.", "Can any other machine match it?"]
+        classified = analyze_speaker_roles([{"id": str(i), "text": text} for i, text in enumerate(texts)], "mystery_curiosity")
+        self.assertEqual([item["speaker_role"] for item in classified], ["questioner", "explainer", "explainer", "explainer", "explainer", "explainer"])
+
+    def test_role_classifier_respects_manual_override(self):
+        segment = {"id": "x", "text": "Edited text", "speaker_role": "guest", "role_locked": True}
+        self.assertEqual(analyze_speaker_roles([segment], "interview")[0]["speaker_role"], "guest")
 
     def test_canonical_composition_order(self):
         self.assertLess(CANONICAL_LAYER_ORDER.index("canvas_background"), CANONICAL_LAYER_ORDER.index("base_video"))

@@ -56,6 +56,7 @@ from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
+from core.speaker_role_service import analyze_speaker_roles
 
 
 APP_NAME = "Machine Studio"
@@ -3579,11 +3580,14 @@ class MainWindow(QMainWindow):
         self.ai_sync_status = QLabel("Chưa đồng bộ")
         self.ai_sync_status.setObjectName("warnText")
         head.addWidget(self.ai_sync_status)
+        self.analyze_voice_roles_btn = QPushButton("AI phân tích lại giọng đọc")
+        self.analyze_voice_roles_btn.clicked.connect(self.analyze_voice_roles_again)
+        head.addWidget(self.analyze_voice_roles_btn)
         rl.addLayout(head)
 
-        self.scene_table = QTableWidget(0, 4)
+        self.scene_table = QTableWidget(0, 5)
         self.scene_table.setHorizontalHeaderLabels([
-            "Time", "Nội dung cảnh", "US Voice", "Vietnamese"
+            "Time", "Nội dung cảnh", "US Voice", "Vietnamese", "Speaker"
         ])
         self.scene_table.verticalHeader().setVisible(False)
         h = self.scene_table.horizontalHeader()
@@ -3591,6 +3595,7 @@ class MainWindow(QMainWindow):
         h.setSectionResizeMode(1, QHeaderView.Stretch)
         h.setSectionResizeMode(2, QHeaderView.Stretch)
         h.setSectionResizeMode(3, QHeaderView.Stretch)
+        h.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.scene_table.setWordWrap(True)
         self.scene_table.itemChanged.connect(self.schedule_autosave)
         rl.addWidget(self.scene_table, 1)
@@ -4631,6 +4636,12 @@ class MainWindow(QMainWindow):
                 if col == 0:
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.scene_table.setItem(row, col, item)
+            role = QComboBox(); style = self.current_ai_style_metadata()
+            for slot, (role_id, label) in enumerate(zip(style.speaker_roles, style.role_labels)):
+                role.addItem(f"{chr(65 + slot)} · {label}", role_id)
+            role_index = role.findData(getattr(scene, "voice_role", style.speaker_roles[0]))
+            role.setCurrentIndex(max(0, role_index)); role.currentIndexChanged.connect(lambda _index, r=row, widget=role: self.set_scene_voice_role(r, str(widget.currentData())))
+            self.scene_table.setCellWidget(row, 4, role)
             self.scene_table.setRowHeight(row, 86)
         self.scene_table.blockSignals(False)
 
@@ -4647,6 +4658,25 @@ class MainWindow(QMainWindow):
                 scene.en_voice = en.text()
             if vi:
                 scene.vi_voice = vi.text()
+
+    def set_scene_voice_role(self, row, role):
+        if 0 <= row < len(self.project.scenes):
+            scene = self.project.scenes[row]; scene.voice_role = str(role); scene.voice_role_locked = True; scene.voice_role_confidence = 1.0
+            self.schedule_autosave()
+
+    def analyze_voice_roles_again(self):
+        self.sync_scene_table(); style = self.current_ai_style_metadata(); config = self.current_ai_config()
+        segments = [{"id": str(scene.index), "text": scene.en_voice, "speaker_role": "", "role_locked": False} for scene in self.project.scenes if scene.en_voice.strip()]
+        if not segments: QMessageBox.information(self, "Voice Roles", "Chưa có kịch bản để phân tích."); return
+        def job(progress, log):
+            result = analyze_speaker_roles(segments, style.id, ai_classifier=(lambda prompt: ai.classify_speaker_roles(config, prompt, log=log)) if config.api_key else None); progress(1, 1); return result
+        def done(result):
+            by_id = {str(item.get("id")): item for item in result}
+            for scene in self.project.scenes:
+                item = by_id.get(str(scene.index))
+                if item: scene.voice_role = str(item.get("speaker_role", scene.voice_role)); scene.voice_role_confidence = float(item.get("confidence", 0)); scene.voice_role_locked = False
+            self.refresh_scene_table(); self.autosave_project(); self.status("AI đã phân tích lại vai giọng đọc.")
+        self.run_worker("AI đang phân tích vai giọng đọc...", job, done)
 
     def transfer_ai_to_exporter(self, switch_tab=False):
         if self.project.video_path:

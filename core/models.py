@@ -22,6 +22,8 @@ class Scene:
     voice_end: float = 0.0
     voice_file: str = ""
     voice_role: str = "single"
+    voice_role_locked: bool = False
+    voice_role_confidence: float = 0.0
 
     @property
     def duration(self) -> float:

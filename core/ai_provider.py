@@ -379,6 +379,15 @@ def test(config: AIConfig, log=None) -> str:
     )
 
 
+def classify_speaker_roles(config: AIConfig, prompt: str, log=None):
+    if normalize_provider(config.provider) == "Google Gemini":
+        return gemini.classify_speaker_roles(config.api_key, config.model, prompt)
+    text = _call_chat(config, [{"role": "user", "content": prompt}], temperature=0.0, max_tokens=3000, log=log, retry_429=1)
+    payload = _json_payload(text)
+    if not isinstance(payload, list): raise AIProviderError("AI role classifier did not return a JSON array.")
+    return payload
+
+
 def _image_data_url(path: str) -> str:
     p = Path(path)
     mime = {
