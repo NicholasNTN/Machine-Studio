@@ -38,5 +38,6 @@ class EditorWorkspace(QWidget):
         self.toolSelected.emit(key)
         return True
     def restore_sizes(self, values):
+        if not isinstance(values, dict): return
         if values.get("workspace_horizontal"): self.horizontal_splitter.setSizes(values["workspace_horizontal"])
         if values.get("workspace_vertical"): self.vertical_splitter.setSizes(values["workspace_vertical"])

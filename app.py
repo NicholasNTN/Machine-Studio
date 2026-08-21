@@ -60,7 +60,7 @@ from editor.blur_zone import BlurZone
 from editor.sequence_manager import SequenceManager
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 from core.audio_state import AudioState, replace_narration_source
-from core.last_used_preferences import LastUsedPreferences
+from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 
@@ -4262,16 +4262,14 @@ class MainWindow(QMainWindow):
     def _load_settings_to_ui(self):
         d = self.settings.data
 
-        provider = d.get("ai_provider", "CKEY")
+        provider = safe_str(d.get("ai_provider"), "CKEY")
         if provider not in self.ai_provider_radios:
             provider = "CKEY"
 
-        self._provider_model_cache = dict(
-            d.get("provider_models", {}) or {}
-        )
-        self._provider_base_cache = dict(
-            d.get("provider_base_urls", {}) or {}
-        )
+        raw_models = d.get("provider_models", {})
+        raw_bases = d.get("provider_base_urls", {})
+        self._provider_model_cache = dict(raw_models) if isinstance(raw_models, dict) else {}
+        self._provider_base_cache = dict(raw_bases) if isinstance(raw_bases, dict) else {}
         self._provider_key_cache = {
             name: self.settings.get_provider_api_key(name)
             for name in self.ai_provider_radios
@@ -4282,75 +4280,81 @@ class MainWindow(QMainWindow):
         self.on_ai_provider_changed(initial=True)
 
         self.tts_model.setCurrentText(
-            d.get("tts_model", "gemini-3.1-flash-tts-preview")
+            safe_str(d.get("tts_model"), "gemini-3.1-flash-tts-preview")
         )
-        self.voice.setCurrentText(d.get("voice", "Kore"))
+        self.voice.setCurrentText(safe_str(d.get("voice"), "Kore"))
         self.voice_style.setPlainText(
-            d.get(
+            safe_str(d.get(
                 "voice_style",
                 "Natural American documentary narrator, confident, curious, medium pace.",
-            )
+            ), "Natural American documentary narrator, confident, curious, medium pace.")
         )
         self.tts_api_key.setText(self.settings.get_api_key())
 
         self.tts_engine.setCurrentText(
-            d.get("tts_engine", "Piper Offline (Free)")
+            safe_str(d.get("tts_engine"), "Piper Offline (Free)")
         )
         QTimer.singleShot(0, self.on_tts_engine_changed)
-        saved_voice = d.get("tts_voice", "en_US-lessac-medium")
+        saved_voice = safe_str(d.get("tts_voice"), "en_US-lessac-medium")
         QTimer.singleShot(
             0,
             lambda v=saved_voice: self.tts_voice.setCurrentText(v),
         )
-        QTimer.singleShot(0, lambda v=d.get("tts_voice_b", ""): self.tts_voice_b.setCurrentText(v))
+        QTimer.singleShot(0, lambda v=safe_str(d.get("tts_voice_b"), ""): self.tts_voice_b.setCurrentText(v))
 
         self.output_dir.setText(
-            d.get("output_dir", str(ROOT / "exports"))
+            safe_str(d.get("output_dir"), str(ROOT / "exports"))
         )
         self.dl_dir.setText(
-            d.get("download_dir", str(ROOT / "downloads"))
+            safe_str(d.get("download_dir"), str(ROOT / "downloads"))
         )
 
-        saved_cookie = d.get(
+        saved_cookie = safe_str(d.get(
             "cookies_browser",
             "Auto (khuyến nghị)",
-        )
+        ), "Auto (khuyến nghị)")
         self.cookies_browser.setCurrentText(
             saved_cookie or "Auto (khuyến nghị)"
         )
-        self.cookies_file.setText(d.get("cookies_file", ""))
-        self.capcut_path.setText(d.get("capcut_path", ""))
+        self.cookies_file.setText(safe_str(d.get("cookies_file"), ""))
+        self.capcut_path.setText(safe_str(d.get("capcut_path"), ""))
 
         if hasattr(self, "market"):
             self.market.setCurrentText(
-                d.get("ai_market", self.market.currentText())
+                safe_str(d.get("ai_market"), self.market.currentText())
             )
         if hasattr(self, "script_style"):
-            saved_style = get_style(d.get("ai_script_style", "factory_documentary"))
+            saved_style = get_style(safe_str(d.get("ai_script_style"), "factory_documentary"))
             saved_index = self.script_style.findData(saved_style.id)
             if saved_index >= 0: self.script_style.setCurrentIndex(saved_index)
             self.update_script_style_translation(saved_style.display_name)
         last = self.last_used_preferences.values
         if last:
-            self.editor_layer_font.setCurrentFont(QFont(str(last.get("text_font", "Arial"))))
-            self.editor_layer_size.setValue(float(last.get("text_font_size", 52)))
-            self.editor_layer_color.setText(str(last.get("text_color", "#FFFFFF")))
-            self.sub_preset.setCurrentText(str(last.get("subtitle_preset", self.sub_preset.currentText())))
-            self.sub_font.setCurrentFont(QFont(str(last.get("subtitle_font", self.sub_font.currentFont().family()))))
-            self.sub_size.setValue(int(last.get("subtitle_size", self.sub_size.value())))
-            self.sub_bold.setChecked(bool(last.get("subtitle_bold", self.sub_bold.isChecked())))
-            self.sub_italic.setChecked(bool(last.get("subtitle_italic", self.sub_italic.isChecked())))
-            self.tts_engine.setCurrentText(str(last.get("voice_engine", self.tts_engine.currentText())))
-            QTimer.singleShot(0, lambda value=str(last.get("voice_a", "")): self.tts_voice.setCurrentText(value) if value else None)
-            QTimer.singleShot(0, lambda value=str(last.get("voice_b", "")): self.tts_voice_b.setCurrentText(value) if value else None)
-            self.tts_speed.setValue(float(last.get("voice_speed", self.tts_speed.value())))
-            self.blur_style.setCurrentText(str(last.get("blur_style", self.blur_style.currentText())))
-            self.blur_opacity.setValue(int(last.get("blur_strength", self.blur_opacity.value())))
-            self.preview_ratio_combo.setCurrentText(str(last.get("canvas_ratio", self.preview_ratio_combo.currentText())))
-            self.resolution.setCurrentText(str(last.get("export_resolution", self.resolution.currentText())))
-            self.codec.setCurrentText(str(last.get("export_codec", self.codec.currentText())))
-            sizes = last.get("workspace_splitter_sizes")
-            if isinstance(sizes, dict): QTimer.singleShot(0, lambda value=sizes: self.video_editor_tab.restore_sizes(value))
+            restorers = (
+                lambda: self.editor_layer_font.setCurrentFont(QFont(safe_str(last.get("text_font"), self.editor_layer_font.currentFont().family()))),
+                lambda: self.editor_layer_size.setValue(safe_float(last.get("text_font_size"), self.editor_layer_size.value())),
+                lambda: self.editor_layer_color.setText(safe_str(last.get("text_color"), self.editor_layer_color.text())),
+                lambda: self.sub_preset.setCurrentText(safe_str(last.get("subtitle_preset"), self.sub_preset.currentText())),
+                lambda: self.sub_font.setCurrentFont(QFont(safe_str(last.get("subtitle_font"), self.sub_font.currentFont().family()))),
+                lambda: self.sub_size.setValue(safe_int(last.get("subtitle_size"), self.sub_size.value())),
+                lambda: self.sub_bold.setChecked(safe_bool(last.get("subtitle_bold"), self.sub_bold.isChecked())),
+                lambda: self.sub_italic.setChecked(safe_bool(last.get("subtitle_italic"), self.sub_italic.isChecked())),
+                lambda: self.tts_engine.setCurrentText(safe_str(last.get("voice_engine"), self.tts_engine.currentText())),
+                lambda: self.tts_speed.setValue(safe_float(last.get("voice_speed"), self.tts_speed.value())),
+                lambda: self.blur_style.setCurrentText(safe_str(last.get("blur_style"), self.blur_style.currentText())),
+                lambda: self.blur_opacity.setValue(safe_int(last.get("blur_strength"), self.blur_opacity.value())),
+                lambda: self.preview_ratio_combo.setCurrentText(safe_str(last.get("canvas_ratio"), self.preview_ratio_combo.currentText())),
+                lambda: self.resolution.setCurrentText(safe_str(last.get("export_resolution"), self.resolution.currentText())),
+                lambda: self.codec.setCurrentText(safe_str(last.get("export_codec"), self.codec.currentText())),
+            )
+            for restore_preference in restorers:
+                try: restore_preference()
+                except Exception: pass  # One optional preference must never abort startup.
+            voice_a = safe_str(last.get("voice_a"), ""); voice_b = safe_str(last.get("voice_b"), "")
+            if voice_a: QTimer.singleShot(0, lambda value=voice_a: self.tts_voice.setCurrentText(value))
+            if voice_b: QTimer.singleShot(0, lambda value=voice_b: self.tts_voice_b.setCurrentText(value))
+            sizes = safe_splitter_sizes(last.get("workspace_splitter_sizes"))
+            if sizes: QTimer.singleShot(0, lambda value=sizes: self.video_editor_tab.restore_sizes(value))
 
 
     def save_settings(self):

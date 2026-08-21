@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+import json
 from pathlib import Path
 
 from core.subtitle_sizing import ass_font_size, canonical_font_size, preview_font_pixels
@@ -14,7 +15,7 @@ from editor.blur_zone import BlurZone, source_zone_canvas_rect, resize_normalize
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core.audio_state import AudioState, replace_narration_source, audio_source_is_loadable
-from core.last_used_preferences import LastUsedPreferences
+from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -191,6 +192,45 @@ class EditorDomainTests(unittest.TestCase):
         prefs.update(text_font="Oswald", text_color="#FFFF00", subtitle_editor_text="Hello", narration_path="voice.wav", blur_zones=[{"x": .1}])
         self.assertEqual(prefs.text_defaults(), {"font": "Oswald", "color": "#FFFF00"})
         self.assertNotIn("narration_path", settings["last_used_preferences"])
+
+    def test_preference_parsing_survives_missing_empty_and_legacy_settings(self):
+        self.assertEqual(LastUsedPreferences({}).values, {})
+        self.assertEqual(LastUsedPreferences({"last_used_preferences": {}}).values, {})
+        self.assertEqual(LastUsedPreferences({"tts_voice": "legacy"}).values, {})
+        self.assertEqual(LastUsedPreferences({"last_used_preferences": "invalid"}).values, {})
+
+    def test_preference_parsing_is_type_safe_for_phase_3d_values(self):
+        self.assertEqual(safe_int("64.0", 52), 64)
+        self.assertEqual(safe_float("1.25", 1.0), 1.25)
+        self.assertFalse(safe_bool("false", True))
+        self.assertEqual(safe_str("Oswald", "Arial"), "Oswald")
+        self.assertEqual(safe_splitter_sizes({"workspace_horizontal": [240, "900", 320.7]}), {"workspace_horizontal": [240, 900, 320]})
+
+    def test_malformed_preferences_fall_back_independently(self):
+        self.assertEqual(safe_int("not-a-number", 48), 48)
+        self.assertEqual(safe_float({"bad": True}, 1.0), 1.0)
+        self.assertTrue(safe_bool(["bad"], True))
+        self.assertEqual(safe_str({"bad": True}, "Default"), "Default")
+        self.assertEqual(safe_splitter_sizes({"workspace_horizontal": "bad", "workspace_vertical": [None, "x", 300]}), {"workspace_vertical": [0, 0, 300]})
+
+    def test_settings_store_startup_scenarios_preserve_files(self):
+        scenarios = (
+            None,
+            "",
+            json.dumps({"tts_voice": "legacy"}),
+            json.dumps({"last_used_preferences": {"text_font_size": "64", "subtitle_bold": "false"}}),
+            json.dumps({"last_used_preferences": {"text_font_size": {"bad": True}, "workspace_splitter_sizes": "broken"}}),
+        )
+        for content in scenarios:
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "settings.json"
+                if content is not None: path.write_text(content, encoding="utf-8")
+                try: saved = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+                except (json.JSONDecodeError, OSError): saved = {}
+                if not isinstance(saved, dict): saved = {}
+                preferences = LastUsedPreferences(saved)
+                self.assertIsInstance(saved, dict); self.assertIsInstance(preferences.values, dict)
+                if content is not None: self.assertEqual(path.read_text(encoding="utf-8"), content)
 
     def test_sequence_voice_subtitle_and_blur_state_isolation(self):
         manager = SequenceManager(); first = manager.active
