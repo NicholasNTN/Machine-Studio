@@ -55,6 +55,11 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(preview_font_pixels(27, 960, 540, 1920, 1080), 14)
         self.assertEqual(preview_font_pixels(27, 540, 960, 1080, 1920), 14)
 
+    def test_subtitle_preview_scaling_for_project_canvases(self):
+        for project_width, project_height in ((1080, 1920), (1920, 1080), (1080, 1350), (1080, 1080)):
+            self.assertEqual(preview_font_pixels(64, project_width / 2, project_height / 2, project_width, project_height), 32)
+            self.assertEqual(ass_font_size(64), 64)
+
     def test_subtitle_group_round_trip(self):
         group = SubtitleGroup("g1", "srt", "captions.srt", SubtitleGroupStyle(font_size=27), ["g1:0"])
         restored = SubtitleGroup.from_dict(group.to_dict())

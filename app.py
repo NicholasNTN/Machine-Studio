@@ -1324,7 +1324,7 @@ class MainWindow(QMainWindow):
         phead.addWidget(self.right_panel_btn)
         self.preview_state = QLabel("Stopped")
         self.preview_state.setObjectName("warnText")
-        phead.addWidget(self.preview_state)
+        self.preview_state.hide()
         cl.addLayout(phead)
 
         self.preview_frame = QFrame()
@@ -1385,12 +1385,8 @@ class MainWindow(QMainWindow):
 
         playrow.addStretch(1)
         playrow.addWidget(start_button)
-        playrow.addWidget(self.editor_toggle_btn)
-        playrow.addWidget(self.hide_sub_btn)
         playrow.addWidget(self.preview_play_button)
         playrow.addWidget(end_button)
-        playrow.addWidget(self.update_preview_btn)
-        playrow.addWidget(live_btn)
         playrow.addStretch(1)
         cl.addLayout(playrow)
 
