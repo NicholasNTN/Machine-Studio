@@ -38,3 +38,7 @@ class TimelineSnapshotCommand(QUndoCommand):
 
     def undo(self): self.apply_callback(self.before)
     def redo(self): self.apply_callback(self.after)
+
+
+class LayerSnapshotCommand(TimelineSnapshotCommand):
+    """Snapshot command for supplemental composition layers."""

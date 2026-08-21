@@ -52,7 +52,7 @@ from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle
-from editor.command_manager import TimelineSnapshotCommand
+from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 
@@ -728,6 +728,19 @@ class MainWindow(QMainWindow):
         self.context_inspector.propertyChanged.connect(
             self._apply_inspector_property
         )
+
+        composition = QGroupBox("Layers / Lớp bổ sung")
+        composition_layout = QVBoxLayout(composition)
+        composition_actions = QHBoxLayout()
+        add_overlay = QPushButton("+ Video Overlay"); add_overlay.clicked.connect(self.editor_add_video_overlay)
+        add_sticker = QPushButton("+ Sticker / Image"); add_sticker.clicked.connect(self.editor_add_image_layer)
+        delete_layer = QPushButton("Delete"); delete_layer.setObjectName("dangerSmall"); delete_layer.clicked.connect(self.editor_delete_selected_layer)
+        move_up = QPushButton("Layer Up"); move_up.clicked.connect(lambda: self.editor_move_selected_layer(-1))
+        move_down = QPushButton("Layer Down"); move_down.clicked.connect(lambda: self.editor_move_selected_layer(1))
+        for button in (add_overlay, add_sticker, move_up, move_down, delete_layer): composition_actions.addWidget(button)
+        composition_layout.addLayout(composition_actions); composition_layout.addWidget(self.editor_layer_list); composition_layout.addWidget(self.editor_layer_props_panel)
+        self.editor_layer_props_panel.setVisible(True)
+        self.advanced_settings_box.layout().insertWidget(1, composition)
 
         voice_page = QWidget(); voice_layout = QVBoxLayout(voice_page); voice_layout.setContentsMargins(0, 0, 0, 0); voice_layout.addWidget(self.voice_settings_box); voice_layout.addWidget(self.voice_audio_strip)
         media_settings = QLabel("Select a video clip for working clip settings. Media import and search stay on the left."); media_settings.setWordWrap(True); media_settings.setObjectName("hint")
@@ -2220,6 +2233,11 @@ class MainWindow(QMainWindow):
         self.editor_layer_opacity.setRange(1, 100)
         self.editor_layer_opacity.setValue(100)
         self.editor_layer_opacity.setSuffix(" %")
+        self.editor_layer_rotation = QDoubleSpinBox(); self.editor_layer_rotation.setRange(-360, 360); self.editor_layer_rotation.setSuffix("°")
+        self.editor_layer_key_mode = QComboBox(); self.editor_layer_key_mode.addItems(["None", "Chroma Key"])
+        self.editor_layer_key_color = QLineEdit("#00FF00")
+        self.editor_layer_similarity = QDoubleSpinBox(); self.editor_layer_similarity.setRange(0.01, 1.0); self.editor_layer_similarity.setSingleStep(0.01); self.editor_layer_similarity.setValue(0.18)
+        self.editor_layer_blend = QDoubleSpinBox(); self.editor_layer_blend.setRange(0.0, 1.0); self.editor_layer_blend.setSingleStep(0.01); self.editor_layer_blend.setValue(0.08)
         self.editor_layer_font = QFontComboBox()
         self.editor_layer_color = QLineEdit("#FFFFFF")
         self.editor_layer_color_btn = QPushButton("Màu")
@@ -2245,6 +2263,10 @@ class MainWindow(QMainWindow):
         props.addWidget(self.editor_layer_font, 3, 1, 1, 3)
         props.addWidget(self.editor_layer_color, 3, 4)
         props.addWidget(self.editor_layer_color_btn, 3, 5)
+        props.addWidget(QLabel("Rotation"), 4, 0); props.addWidget(self.editor_layer_rotation, 4, 1)
+        props.addWidget(QLabel("Background Removal"), 4, 2); props.addWidget(self.editor_layer_key_mode, 4, 3)
+        props.addWidget(self.editor_layer_key_color, 4, 4); props.addWidget(self.editor_layer_similarity, 4, 5)
+        props.addWidget(QLabel("Key blend"), 5, 0); props.addWidget(self.editor_layer_blend, 5, 1)
 
         self.editor_layer_hint = QLabel(
             "Kéo layer trên Preview; kéo handle góc phải để resize. "
@@ -2252,7 +2274,7 @@ class MainWindow(QMainWindow):
         )
         self.editor_layer_hint.setObjectName("hint")
         self.editor_layer_hint.setWordWrap(True)
-        props.addWidget(self.editor_layer_hint, 4, 0, 1, 6)
+        props.addWidget(self.editor_layer_hint, 6, 0, 1, 6)
 
         for widget in [
             self.editor_layer_text,
@@ -2262,12 +2284,14 @@ class MainWindow(QMainWindow):
             self.editor_layer_y,
             self.editor_layer_size,
             self.editor_layer_opacity,
+            self.editor_layer_rotation, self.editor_layer_key_mode, self.editor_layer_key_color, self.editor_layer_similarity, self.editor_layer_blend,
             self.editor_layer_font,
             self.editor_layer_color,
         ]:
             signal = (
                 getattr(widget, "textChanged", None)
                 or getattr(widget, "valueChanged", None)
+                or getattr(widget, "currentTextChanged", None)
                 or getattr(widget, "currentFontChanged", None)
             )
             if signal:
@@ -3019,7 +3043,7 @@ class MainWindow(QMainWindow):
         self.editor_layer_list.clear()
 
         for i, layer in enumerate(self.editor_layers):
-            kind = "Text" if layer.get("type") == "text" else "Ảnh"
+            kind = "Text" if layer.get("type") == "text" else "Video Overlay" if layer.get("type") == "video" else "Sticker"
             title = (
                 str(layer.get("text", "") or "")[:35]
                 if layer.get("type") == "text"
@@ -3117,6 +3141,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        before = [dict(layer) for layer in self.editor_layers]
         layer = editor_engine.make_image_layer(
             path,
             max(
@@ -3133,6 +3158,45 @@ class MainWindow(QMainWindow):
         )
         self.update_live_overlay_state()
         self.schedule_autosave()
+        self._push_layer_undo("Add sticker", before)
+
+    def editor_add_video_overlay(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Thêm Video Overlay", "", "Video (*.mp4 *.mov *.mkv *.avi *.webm)")
+        if not path: return
+        before = [dict(layer) for layer in self.editor_layers]
+        layer = editor_engine.make_video_overlay(path, max(0.1, editor_engine.total_duration(self.editor_clips) or self.player.duration() / 1000.0))
+        self.editor_layers.append(layer); self.editor_selected_layer = len(self.editor_layers) - 1
+        self._ensure_overlay_video_players(); self.editor_refresh_layer_list(); self.editor_select_extra_layer_in_list(self.editor_selected_layer); self.update_live_overlay_state(); self.schedule_autosave()
+        self._push_layer_undo("Add video overlay", before)
+
+    def editor_move_selected_layer(self, delta):
+        index = self.editor_selected_layer
+        target = max(0, min(len(self.editor_layers) - 1, index + int(delta)))
+        if not (0 <= index < len(self.editor_layers)) or target == index: return
+        before = [dict(layer) for layer in self.editor_layers]
+        self.editor_layers.insert(target, self.editor_layers.pop(index)); self.editor_selected_layer = target
+        self.editor_refresh_layer_list(); self.editor_select_extra_layer_in_list(target); self.update_live_overlay_state(); self.schedule_autosave()
+        self._push_layer_undo("Reorder layer", before)
+
+    def _apply_layer_snapshot(self, layers):
+        self.editor_layers[:] = [dict(layer) for layer in layers]; self.editor_selected_layer = min(self.editor_selected_layer, len(self.editor_layers) - 1)
+        self.editor_refresh_layer_list(); self.update_live_overlay_state(); self.schedule_autosave()
+
+    def _push_layer_undo(self, label, before):
+        after = [dict(layer) for layer in self.editor_layers]
+        if before != after: self.editor_document.commands.execute(LayerSnapshotCommand(label, before, after, self._apply_layer_snapshot))
+
+    def _ensure_overlay_video_players(self):
+        if not hasattr(self, "_overlay_video_players"): self._overlay_video_players = {}
+        active_ids = {str(layer.get("id")) for layer in self.editor_layers if layer.get("type") == "video"}
+        for layer in self.editor_layers:
+            layer_id = str(layer.get("id", ""))
+            if layer.get("type") != "video" or layer_id in self._overlay_video_players: continue
+            player = QMediaPlayer(self); sink = QVideoSink(self); player.setVideoSink(sink); player.setSource(QUrl.fromLocalFile(str(layer.get("path", ""))))
+            sink.videoFrameChanged.connect(lambda frame, lid=layer_id: self.live_overlay.set_editor_video_frame(lid, frame.toImage()) if frame is not None and frame.isValid() else None)
+            self._overlay_video_players[layer_id] = player
+        for layer_id in list(self._overlay_video_players):
+            if layer_id not in active_ids: self._overlay_video_players.pop(layer_id).deleteLater()
 
     def editor_add_blur_layer(self):
         self.blur_enabled.setChecked(True)
@@ -3240,6 +3304,11 @@ class MainWindow(QMainWindow):
             self.editor_layer_opacity.setValue(
                 int(layer.get("opacity", 100))
             )
+            self.editor_layer_rotation.setValue(float(layer.get("rotation", 0)))
+            self.editor_layer_key_mode.setCurrentText("Chroma Key" if layer.get("background_removal") == "chroma_key" else "None")
+            self.editor_layer_key_color.setText(str(layer.get("key_color", "#00FF00")))
+            self.editor_layer_similarity.setValue(float(layer.get("similarity", 0.18)))
+            self.editor_layer_blend.setValue(float(layer.get("blend", 0.08)))
 
             for w in widgets:
                 w.blockSignals(False)
@@ -3282,6 +3351,10 @@ class MainWindow(QMainWindow):
         layer["x"] = self.editor_layer_x.value()
         layer["y"] = self.editor_layer_y.value()
         layer["opacity"] = self.editor_layer_opacity.value()
+        layer["rotation"] = self.editor_layer_rotation.value()
+        layer["background_removal"] = "chroma_key" if self.editor_layer_key_mode.currentText() == "Chroma Key" else "none"
+        layer["key_color"] = self.editor_layer_key_color.text().strip() or "#00FF00"
+        layer["similarity"] = self.editor_layer_similarity.value(); layer["blend"] = self.editor_layer_blend.value()
 
         if layer.get("type") == "text":
             layer["text"] = self.editor_layer_text.text()
@@ -3356,6 +3429,7 @@ class MainWindow(QMainWindow):
                 self.overlay_text.setText(text)
 
     def editor_delete_selected_layer(self):
+        before = [dict(layer) for layer in self.editor_layers]
         item = self.editor_layer_list.currentItem()
         if not item:
             return
@@ -3383,10 +3457,12 @@ class MainWindow(QMainWindow):
         self.editor_refresh_layer_list()
         self.update_live_overlay_state()
         self.schedule_autosave()
+        self._push_layer_undo("Delete layer", before)
 
     def on_live_editor_layer_geometry_changed(self, index, layer):
         if not (0 <= index < len(self.editor_layers)):
             return
+        if not hasattr(self, "_layer_drag_before") or self._layer_drag_before is None: self._layer_drag_before = [dict(item) for item in self.editor_layers]
         self.editor_layers[index] = dict(layer)
         self.editor_selected_layer = index
         self.editor_select_extra_layer_in_list(index)
@@ -5566,6 +5642,15 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "editor_current_time")
                 else second,
             )
+            self._ensure_overlay_video_players()
+            for layer in self.editor_layers:
+                if layer.get("type") != "video": continue
+                player = self._overlay_video_players.get(str(layer.get("id", "")))
+                if player is None: continue
+                local_ms = max(0, int((second - float(layer.get("start", 0))) * 1000))
+                if abs(player.position() - local_ms) > 140: player.setPosition(local_ms)
+                if float(layer.get("start", 0)) <= second < float(layer.get("end", 0)) and self.player.playbackState() == QMediaPlayer.PlayingState: player.play()
+                else: player.pause()
         except Exception:
             self.log_line("[LIVE OVERLAY UPDATE ERROR]\n" + traceback.format_exc())
 
@@ -5640,6 +5725,8 @@ class MainWindow(QMainWindow):
             hasattr(self, "live_overlay")
             and self.live_overlay.selected_type == "editor_layer"
         ):
+            if hasattr(self, "_layer_drag_before") and self._layer_drag_before is not None:
+                before = self._layer_drag_before; self._layer_drag_before = None; self._push_layer_undo("Transform layer", before)
             self.schedule_autosave()
             self.schedule_processed_preview()
             return

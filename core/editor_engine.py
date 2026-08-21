@@ -74,6 +74,12 @@ def make_clip(path: str) -> dict:
     }
 
 
+def make_video_overlay(path: str, duration: float) -> dict:
+    p = Path(path)
+    if not p.exists(): raise EditorError(f"Không tìm thấy overlay video: {path}")
+    return {"id": _clip_id(str(p.resolve())), "type": "video", "path": str(p.resolve()), "enabled": True, "start": 0.0, "end": max(0.1, float(duration)), "x": 50.0, "y": 50.0, "scale": 35.0, "rotation": 0.0, "opacity": 100, "background_removal": "none", "key_color": "#00FF00", "similarity": 0.18, "blend": 0.08}
+
+
 def timeline_ranges(clips: list[dict]) -> list[tuple[float, float]]:
     ranges = []
     cursor = 0.0

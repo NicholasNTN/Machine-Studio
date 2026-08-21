@@ -12,6 +12,7 @@ from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
+from editor.layer_order import CANONICAL_LAYER_ORDER
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -46,6 +47,11 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(roles, ["before", "before", "after", "after"])
         self.assertEqual(voice_for_role("after", "A", "B", "Before and after"), "B")
         self.assertEqual(voice_for_role("single", "A", "B", "Factory documentary"), "A")
+
+    def test_canonical_composition_order(self):
+        self.assertLess(CANONICAL_LAYER_ORDER.index("canvas_background"), CANONICAL_LAYER_ORDER.index("base_video"))
+        self.assertLess(CANONICAL_LAYER_ORDER.index("overlay_video"), CANONICAL_LAYER_ORDER.index("subtitle"))
+        self.assertEqual(CANONICAL_LAYER_ORDER[-1], "logo")
 
     def test_non_video_content_extends_trimmed_video_duration(self):
         state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])

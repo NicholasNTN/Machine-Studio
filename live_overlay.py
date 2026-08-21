@@ -81,6 +81,7 @@ class InteractivePreviewOverlay(QWidget):
         self.editor_layers: list[dict] = []
         self.editor_time = 0.0
         self._editor_pixmaps: dict[str, QPixmap] = {}
+        self._editor_video_frames: dict[str, QImage] = {}
         self.start_editor_layer = None
         self.start_video_transform = None
 
@@ -275,6 +276,9 @@ class InteractivePreviewOverlay(QWidget):
             self.selected_index = -1
         self.update()
 
+    def set_editor_video_frame(self, layer_id, image):
+        if image is not None and not image.isNull(): self._editor_video_frames[str(layer_id)] = image.copy(); self.update()
+
     def editor_layer_active(self, layer):
         if not layer.get("enabled", True):
             return False
@@ -290,14 +294,15 @@ class InteractivePreviewOverlay(QWidget):
         cx = vr.left() + vr.width() * float(layer.get("x", 50.0)) / 100
         cy = vr.top() + vr.height() * float(layer.get("y", 50.0)) / 100
 
-        if layer.get("type") == "image":
+        if layer.get("type") in ("image", "video"):
             scale_pct = max(2.0, min(80.0, float(layer.get("scale", 20.0))))
             width = vr.width() * scale_pct / 100.0
             path = str(layer.get("path", "") or "")
             pix = self._editor_pixmaps.get(path)
-            if pix is None:
-                pix = QPixmap(path) if path and Path(path).exists() else QPixmap()
-                self._editor_pixmaps[path] = pix
+            if layer.get("type") == "video":
+                frame = self._editor_video_frames.get(str(layer.get("id", ""))); pix = QPixmap.fromImage(frame) if frame is not None else QPixmap()
+            elif pix is None:
+                pix = QPixmap(path) if path and Path(path).exists() else QPixmap(); self._editor_pixmaps[path] = pix
             ratio = 1.0
             if not pix.isNull() and pix.height() > 0:
                 ratio = pix.width() / pix.height()
@@ -693,6 +698,7 @@ class InteractivePreviewOverlay(QWidget):
                 p.setOpacity(
                     max(0.05, min(1.0, self.logo_opacity / 100))
                 )
+                p.translate(rect.center()); p.rotate(float(layer.get("rotation", 0))); p.translate(-rect.center())
                 if not self._logo_pixmap.isNull():
                     p.drawPixmap(rect.toRect(), self._logo_pixmap)
                 else:
@@ -751,18 +757,19 @@ class InteractivePreviewOverlay(QWidget):
                     max(0.01, min(1.0, float(layer.get("opacity", 100)) / 100.0))
                 )
 
-                if layer.get("type") == "image":
+                if layer.get("type") in ("image", "video"):
                     path = str(layer.get("path", "") or "")
                     pix = self._editor_pixmaps.get(path)
-                    if pix is None:
-                        pix = QPixmap(path) if path and Path(path).exists() else QPixmap()
-                        self._editor_pixmaps[path] = pix
+                    if layer.get("type") == "video":
+                        frame = self._editor_video_frames.get(str(layer.get("id", ""))); pix = QPixmap.fromImage(frame) if frame is not None else QPixmap()
+                    elif pix is None:
+                        pix = QPixmap(path) if path and Path(path).exists() else QPixmap(); self._editor_pixmaps[path] = pix
                     if not pix.isNull():
                         p.drawPixmap(rect.toRect(), pix)
                     else:
                         p.fillRect(rect, QColor(70, 120, 170, 130))
                         p.setPen(Qt.white)
-                        p.drawText(rect, Qt.AlignCenter, "IMAGE")
+                        p.drawText(rect, Qt.AlignCenter, "VIDEO" if layer.get("type") == "video" else "IMAGE")
                 else:
                     text = str(layer.get("text", "Text") or "Text")
                     vr_scale = max(0.45, vr.height() / 1920 * 1.6)

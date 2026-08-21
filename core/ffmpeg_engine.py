@@ -483,7 +483,14 @@ def export_video(
             float(layer.get("end", duration) or duration) / timing_speed,
         )
     editor_image_inputs = []
+    editor_video_inputs = []
     for layer_index, layer in enumerate(editor_layers):
+        if layer.get("type") == "video":
+            path = str(layer.get("path", "") or "")
+            if path and Path(path).exists():
+                video_input_idx = input_count; cmd += ["-stream_loop", "-1", "-i", path]; input_count += 1
+                editor_video_inputs.append((layer_index, video_input_idx, layer))
+            continue
         if layer.get("type") != "image":
             continue
         path = str(layer.get("path", "") or "")
@@ -670,6 +677,24 @@ def export_video(
             f"[{current}][logo]overlay={pos}:format=auto[vlogo]",
         ]
         current = "vlogo"
+
+    # Timed overlay videos. Chroma key is explicit and never presented as AI removal.
+    for layer_index, video_input_idx, layer in editor_video_inputs:
+        scale_pct = max(2.0, min(100.0, float(layer.get("scale", 35.0) or 35.0)))
+        layer_width = max(20, round(out_w * scale_pct / 100.0)); opacity = max(0.01, min(1.0, float(layer.get("opacity", 100)) / 100.0))
+        x_pct = float(layer.get("x", 50.0)) / 100.0; y_pct = float(layer.get("y", 50.0)) / 100.0
+        start = max(0.0, float(layer.get("start", 0.0))); end = max(start + 0.05, float(layer.get("end", duration)))
+        filters = [f"setpts=PTS-STARTPTS+{start:.4f}/TB", f"scale={layer_width}:-1", "format=rgba"]
+        if layer.get("background_removal") == "chroma_key":
+            key = str(layer.get("key_color", "#00FF00")).replace("#", "0x")
+            filters.append(f"colorkey={key}:{max(0.01,min(1.0,float(layer.get('similarity',0.18)))):.3f}:{max(0.0,min(1.0,float(layer.get('blend',0.08)))):.3f}")
+        rotation = float(layer.get("rotation", 0) or 0)
+        if abs(rotation) > 0.001: filters.append(f"rotate={rotation}*PI/180:ow=rotw(iw):oh=roth(ih):c=none")
+        if opacity < 0.999: filters.append(f"colorchannelmixer=aa={opacity:.3f}")
+        input_label = f"edvidin{layer_index}"; output_label = f"edvidout{layer_index}"
+        fc.append(f"[{video_input_idx}:v]{','.join(filters)}[{input_label}]")
+        fc.append(f"[{current}][{input_label}]overlay=W*{x_pct:.6f}-w/2:H*{y_pct:.6f}-h/2:enable='between(t,{start:.4f},{end:.4f})':shortest=0:format=auto[{output_label}]")
+        current = output_label
 
     # Multiple Basic Editor image layers. Their visibility is controlled by
     # each layer's start/end timeline, just like CapCut overlay tracks.
