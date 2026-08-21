@@ -438,6 +438,15 @@ class InteractivePreviewOverlay(QWidget):
             rect.right() - s, rect.bottom() - s, s * 1.7, s * 1.7
         )
 
+    def corner_handle_rects(self, rect: QRectF):
+        s = float(self.HANDLE)
+        return {
+            "top_left": QRectF(rect.left()-s/2, rect.top()-s/2, s, s),
+            "top_right": QRectF(rect.right()-s/2, rect.top()-s/2, s, s),
+            "bottom_left": QRectF(rect.left()-s/2, rect.bottom()-s/2, s, s),
+            "bottom_right": QRectF(rect.right()-s/2, rect.bottom()-s/2, s, s),
+        }
+
     # ==========================================================
     # PAINT HELPERS
     # ==========================================================
@@ -685,7 +694,7 @@ class InteractivePreviewOverlay(QWidget):
                     if selected:
                         p.setBrush(border)
                         p.setPen(Qt.NoPen)
-                        p.drawRect(self.handle_rect(rect))
+                        for handle in self.corner_handle_rects(rect).values(): p.drawRect(handle)
 
             # User logo.
             if self.logo_enabled:
@@ -996,12 +1005,11 @@ class InteractivePreviewOverlay(QWidget):
                 rect = self.pct_rect(
                     self.blur_zones[self.selected_index]
                 )
-                if self.handle_rect(rect).contains(pos):
-                    self.drag_mode = "resize_blur"
-                    self.start_zone = dict(
-                        self.blur_zones[self.selected_index]
-                    )
-                    return
+                for corner, handle in self.corner_handle_rects(rect).items():
+                    if handle.contains(pos):
+                        self.drag_mode = f"resize_blur:{corner}"
+                        self.start_zone = dict(self.blur_zones[self.selected_index])
+                        return
 
             if self.selected_type == "sub" and self.sub_enabled:
                 rect = self.subtitle_rect()
@@ -1219,13 +1227,17 @@ class InteractivePreviewOverlay(QWidget):
                 self.update()
                 return
 
-            if self.drag_mode in ("move_blur", "resize_blur"):
+            if self.drag_mode == "move_blur" or self.drag_mode.startswith("resize_blur:"):
                 i = self.selected_index
                 if (
                     not (0 <= i < len(self.blur_zones))
                     or not self.start_zone
                 ):
                     return
+                source_rect = self.source_display_rect()
+                if source_rect.width() > 1 and source_rect.height() > 1:
+                    dx = (event.position().x() - self.press_pos.x()) / source_rect.width() * 100
+                    dy = (event.position().y() - self.press_pos.y()) / source_rect.height() * 100
                 z = dict(self.start_zone)
 
                 if self.drag_mode == "move_blur":
@@ -1245,20 +1257,14 @@ class InteractivePreviewOverlay(QWidget):
                     )
                     z = self._snap_zone_xy(z)
                 else:
-                    z["w"] = max(
-                        3,
-                        min(
-                            100 - float(z.get("x", 0)),
-                            float(z.get("w", 10)) + dx,
-                        ),
-                    )
-                    z["h"] = max(
-                        3,
-                        min(
-                            100 - float(z.get("y", 0)),
-                            float(z.get("h", 10)) + dy,
-                        ),
-                    )
+                    corner = self.drag_mode.split(":", 1)[1]
+                    x, y, w, h = [float(z.get(k, d)) for k, d in (("x",0),("y",0),("w",10),("h",10))]
+                    right, bottom = x+w, y+h
+                    if "left" in corner: x = min(right-3, max(0, x+dx))
+                    else: right = max(x+3, min(100, right+dx))
+                    if "top" in corner: y = min(bottom-3, max(0, y+dy))
+                    else: bottom = max(y+3, min(100, bottom+dy))
+                    z.update({"x": x, "y": y, "w": right-x, "h": bottom-y})
 
                 self.blur_zones[i] = z
                 self.blurZoneChanged.emit(i, z)

@@ -53,3 +53,12 @@ def source_zone_canvas_rect(zone, source_width, source_height, canvas_width, can
     xs, ys = [p[0] for p in points], [p[1] for p in points]
     x0, y0 = max(0.0, min(xs)), max(0.0, min(ys)); x1, y1 = min(float(canvas_width), max(xs)), min(float(canvas_height), max(ys))
     return CanvasRect(x0, y0, max(0.0, x1-x0), max(0.0, y1-y0))
+
+
+def resize_normalized_zone(zone: BlurZone, corner: str, dx: float, dy: float, minimum=.03) -> BlurZone:
+    x, y, right, bottom = zone.x, zone.y, zone.x + zone.width, zone.y + zone.height
+    if "left" in corner: x = min(right-minimum, max(0.0, x+dx))
+    else: right = max(x+minimum, min(1.0, right+dx))
+    if "top" in corner: y = min(bottom-minimum, max(0.0, y+dy))
+    else: bottom = max(y+minimum, min(1.0, bottom+dy))
+    return BlurZone(zone.id, zone.coordinate_space, x, y, right-x, bottom-y)

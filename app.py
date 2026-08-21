@@ -5438,9 +5438,6 @@ class MainWindow(QMainWindow):
                 return
             if checked:
                 self.blur_enabled.setChecked(True)
-                row = self.ensure_auto_sub_zone(center=True)
-                self.blur_zone_list.setCurrentRow(row)
-                self.sync_sub_layout_to_auto_blur(update_cues=False)
                 self.auto_sub_status.setText("Auto Sub: đang dò...")
                 # Dò tự động nếu có video; kết quả vẫn có thể kéo sửa bằng chuột.
                 QTimer.singleShot(80, self.detect_source_subtitle_zone)
@@ -5473,7 +5470,10 @@ class MainWindow(QMainWindow):
 
         def done(zone):
             try:
-                row = self.ensure_auto_sub_zone(zone, center=True)
+                if not zone:
+                    self.auto_sub_status.setText("Không phát hiện được vùng phụ đề gốc.")
+                    return
+                row = self.ensure_auto_sub_zone(zone, center=False)
                 self.blur_zone_list.setCurrentRow(row)
                 self.sync_sub_layout_to_auto_blur(update_cues=True)
                 self.auto_sub_status.setText(
@@ -5487,10 +5487,7 @@ class MainWindow(QMainWindow):
 
         def err(tb):
             self.log_line("[AUTO SUB DETECT ERROR]\n" + tb[-3500:])
-            row = self.ensure_auto_sub_zone()
-            self.blur_zone_list.setCurrentRow(row)
-            self.auto_sub_status.setText("Auto Sub: dùng vùng mặc định — kéo để chỉnh")
-            self.update_live_overlay_state()
+            self.auto_sub_status.setText("Không phát hiện được vùng phụ đề gốc.")
 
         def enable_button():
             self.auto_sub_detect_btn.setEnabled(True)

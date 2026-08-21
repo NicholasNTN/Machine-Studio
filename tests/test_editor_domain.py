@@ -8,7 +8,7 @@ from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
 from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle, subtitle_group_is_visible, active_subtitle_render_state
 from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
-from editor.blur_zone import BlurZone, source_zone_canvas_rect
+from editor.blur_zone import BlurZone, source_zone_canvas_rect, resize_normalized_zone
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core.audio_state import AudioState, replace_narration_source, audio_source_is_loadable
@@ -139,6 +139,13 @@ class EditorDomainTests(unittest.TestCase):
         zone = BlurZone.from_dict({"x": 12, "y": 73, "w": 75, "h": 16})
         self.assertEqual(zone.coordinate_space, "source_video")
         self.assertAlmostEqual(zone.width, .75)
+
+    def test_normalized_blur_resizes_from_all_corners(self):
+        zone = BlurZone("z", x=.2, y=.2, width=.5, height=.4)
+        for corner in ("top_left", "top_right", "bottom_left", "bottom_right"):
+            resized = resize_normalized_zone(zone, corner, .05, .04)
+            self.assertGreaterEqual(resized.width, .03)
+            self.assertGreaterEqual(resized.height, .03)
 
     def test_narration_replacement_preserves_user_audio_state(self):
         state = AudioState(True, .42, True, .67, False, .31)

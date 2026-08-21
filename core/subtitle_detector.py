@@ -8,10 +8,6 @@ class SubtitleDetectionError(RuntimeError):
     pass
 
 
-def _fallback_zone():
-    return {"x": 8.0, "y": 71.0, "w": 84.0, "h": 11.0, "auto": True}
-
-
 def detect_source_subtitle_zone(video_path: str, samples: int = 7) -> dict:
     """Estimate the baked-in subtitle band using only local OpenCV analysis.
 
@@ -26,12 +22,12 @@ def detect_source_subtitle_zone(video_path: str, samples: int = 7) -> dict:
     try:
         import cv2
         import numpy as np
-    except Exception:
-        return _fallback_zone()
+    except Exception as exc:
+        raise SubtitleDetectionError("OpenCV không khả dụng để dò phụ đề gốc.") from exc
 
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
-        return _fallback_zone()
+        raise SubtitleDetectionError("Không mở được video để dò phụ đề gốc.")
 
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 0) or 30.0
@@ -119,7 +115,10 @@ def detect_source_subtitle_zone(video_path: str, samples: int = 7) -> dict:
 
     cap.release()
     if not boxes:
-        return _fallback_zone()
+        return {}
+    confidence = len(boxes) / max(1, len(positions))
+    if confidence < 0.28:
+        return {}
 
     import statistics
     xs = [b[0] for b in boxes]
@@ -144,4 +143,5 @@ def detect_source_subtitle_zone(video_path: str, samples: int = 7) -> dict:
         "w": round(w, 1),
         "h": round(h, 1),
         "auto": True,
+        "confidence": round(confidence, 3),
     }
