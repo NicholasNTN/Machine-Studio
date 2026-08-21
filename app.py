@@ -55,6 +55,7 @@ from editor.subtitle_group import SubtitleGroupStyle
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
+from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 
 
 APP_NAME = "Machine Studio"
@@ -104,6 +105,7 @@ AI_STYLE_LIBRARY = {
     "Myth vs fact": "Hiểu lầm vs sự thật — đặt quan niệm phổ biến cạnh dữ kiện thực tế.",
     "Data driven explainer": "Giải thích dựa dữ liệu — ưu tiên số liệu, tỷ lệ và so sánh định lượng.",
 }
+AI_STYLE_LIBRARY = {style.display_name: f"{style.display_name_vi} — {style.description}" for style in AI_STYLES}
 
 
 WHEEL_INPUT_LOCKED = True
@@ -3513,7 +3515,13 @@ class MainWindow(QMainWindow):
         self.market = QComboBox()
         self.market.addItems(["US", "Vietnam", "Global English"])
         self.script_style = QComboBox()
-        self.script_style.addItems(list(AI_STYLE_LIBRARY.keys()))
+        for mode, styles in grouped_styles().items():
+            if not styles: continue
+            self.script_style.addItem(VOICE_MODE_LABELS[mode]); header_index = self.script_style.count() - 1
+            item = self.script_style.model().item(header_index); item.setEnabled(False)
+            for style in styles:
+                self.script_style.addItem(f"{style.display_name}  •  {style.display_name_vi}  •  {style.voice_count_label}", style.id)
+        self.script_style.setCurrentIndex(1)
         self.script_style.setMaxVisibleItems(18)
         self.script_style_vi = QLabel()
         self.script_style_vi.setObjectName("hint")
@@ -3541,9 +3549,7 @@ class MainWindow(QMainWindow):
         ag.addRow("", self.ai_include_audio)
         ag.addRow("", self.auto_ai_button)
         ll.addWidget(ai_box)
-        self.update_script_style_translation(
-            self.script_style.currentText()
-        )
+        self.update_script_style_translation(self.current_ai_style_name())
 
         summary_box = QGroupBox("AI Understanding")
         sl = QVBoxLayout(summary_box)
@@ -4112,12 +4118,10 @@ class MainWindow(QMainWindow):
                 d.get("ai_market", self.market.currentText())
             )
         if hasattr(self, "script_style"):
-            saved_style = d.get("ai_script_style", "Factory documentary")
-            if self.script_style.findText(saved_style) >= 0:
-                self.script_style.setCurrentText(saved_style)
-            self.update_script_style_translation(
-                self.script_style.currentText()
-            )
+            saved_style = get_style(d.get("ai_script_style", "factory_documentary"))
+            saved_index = self.script_style.findData(saved_style.id)
+            if saved_index >= 0: self.script_style.setCurrentIndex(saved_index)
+            self.update_script_style_translation(saved_style.display_name)
 
 
     def save_settings(self):
@@ -4145,7 +4149,7 @@ class MainWindow(QMainWindow):
                 self.market.currentText() if hasattr(self, "market") else "US"
             ),
             "ai_script_style": (
-                self.script_style.currentText()
+                self.current_ai_style_metadata().id
                 if hasattr(self, "script_style")
                 else "Factory documentary"
             ),
@@ -4491,19 +4495,23 @@ class MainWindow(QMainWindow):
         return target, max(2.0, duration / target)
 
     def update_script_style_translation(self, style_name):
+        style_meta = self.current_ai_style_metadata()
         if hasattr(self, "script_style_vi"):
             self.script_style_vi.setText(
-                AI_STYLE_LIBRARY.get(
-                    str(style_name),
-                    "Phong cách tùy chỉnh — giữ tên tiếng Anh trong prompt.",
-                )
+                f"{style_meta.display_name_vi}\n{style_meta.description}\n{style_meta.voice_count_label}"
             )
-        roles = dual_voice_roles(str(style_name))
+        roles = tuple(zip(style_meta.speaker_roles, style_meta.role_labels)) if style_meta.voice_mode != "single" else None
         if hasattr(self, "tts_voice_b"):
             dual = roles is not None
             self.tts_voice_b_label.setVisible(dual); self.tts_voice_b.setVisible(dual); self.tts_voice_b_try.setVisible(dual)
             self.tts_voice_a_label.setText(roles[0][1] if dual else "Giọng")
             if dual: self.tts_voice_b_label.setText(roles[1][1])
+
+    def current_ai_style_metadata(self):
+        style_id = self.script_style.currentData() if hasattr(self, "script_style") else "factory_documentary"
+        return get_style(str(style_id or "factory_documentary"))
+
+    def current_ai_style_name(self): return self.current_ai_style_metadata().display_name
 
     def ai_fast_pipeline(self):
         video = self.ai_video_path.text().strip()
@@ -4528,7 +4536,7 @@ class MainWindow(QMainWindow):
 
         model = config.model
         market = self.market.currentText()
-        style = self.script_style.currentText()
+        style = self.current_ai_style_metadata().id
         include_audio = self.ai_include_audio.isChecked()
         frames_dir = workspace / "fast_frames"
         audio_path = workspace / "fast_source_audio.wav"
@@ -6069,7 +6077,7 @@ class MainWindow(QMainWindow):
         selected_engine = self.tts_engine.currentText()
         selected_voice = self.tts_voice.currentText().strip()
         selected_voice_b = self.tts_voice_b.currentText().strip() or selected_voice
-        selected_style = self.script_style.currentText() if hasattr(self, "script_style") else ""
+        selected_style = self.current_ai_style_metadata().id if hasattr(self, "script_style") else "factory_documentary"
         speed = self.tts_speed.value()
         google_tts_key = self.tts_api_key.text().strip()
         gemini_model = self.tts_model.currentText().strip()

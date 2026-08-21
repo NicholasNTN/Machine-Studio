@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .ai_styles import get_style
+
 
 STYLE_IDS = {
     "Before and after": "BEFORE_AND_AFTER",
@@ -13,11 +15,13 @@ DUAL_VOICE_ROLES = {
 
 
 def style_id(display_name: str) -> str:
-    return STYLE_IDS.get(str(display_name), str(display_name).upper().replace(" ", "_"))
+    return get_style(str(display_name)).id
 
 
 def dual_voice_roles(display_name: str):
-    return DUAL_VOICE_ROLES.get(style_id(display_name))
+    style = get_style(str(display_name))
+    if style.voice_mode != "dual": return None
+    return tuple(zip(style.speaker_roles, style.role_labels))
 
 
 def assign_role(display_name: str, index: int, total: int, supplied: str = "") -> str:

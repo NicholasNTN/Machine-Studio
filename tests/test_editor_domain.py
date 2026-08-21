@@ -13,6 +13,7 @@ from core.downloader import safe_output_filename
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
+from core.ai_styles import AI_STYLES, grouped_styles
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -52,6 +53,15 @@ class EditorDomainTests(unittest.TestCase):
         self.assertLess(CANONICAL_LAYER_ORDER.index("canvas_background"), CANONICAL_LAYER_ORDER.index("base_video"))
         self.assertLess(CANONICAL_LAYER_ORDER.index("overlay_video"), CANONICAL_LAYER_ORDER.index("subtitle"))
         self.assertEqual(CANONICAL_LAYER_ORDER[-1], "logo")
+
+    def test_ai_style_metadata_is_complete_and_unique(self):
+        self.assertEqual(len({style.id for style in AI_STYLES}), len(AI_STYLES))
+        for style in AI_STYLES:
+            self.assertTrue(style.id and style.display_name and style.display_name_vi)
+            self.assertIn(style.voice_mode, {"single", "dual", "triple", "multi"})
+            self.assertTrue(style.speaker_roles)
+        dual_ids = {style.id for style in grouped_styles()["dual"]}
+        self.assertTrue({"mystery_curiosity", "before_after", "interview", "question_answer", "debate", "problem_solution"}.issubset(dual_ids))
 
     def test_non_video_content_extends_trimmed_video_duration(self):
         state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])
