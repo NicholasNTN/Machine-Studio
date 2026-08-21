@@ -19,6 +19,7 @@ from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from core.media_library import migrate_global_media_library
+from core.sequence_context import active_editor_source, find_origin_sequence
 from editor.layer_order import CANONICAL_LAYER_ORDER
 from editor.preview_binding import PreviewBinding, binding_after_clip_change
 from editor.sequence_manager import SequenceManager
@@ -253,6 +254,21 @@ class EditorDomainTests(unittest.TestCase):
         second = manager.create(); second.state.update({"narration_path": "voice-b.wav", "preview_cues": [(0, 1, "B")], "blur_zones": [{"id": "b"}]})
         manager.activate(first.id); self.assertEqual(manager.active.state["narration_path"], "voice-a.wav")
         manager.activate(second.id); self.assertEqual(manager.active.state["blur_zones"][0]["id"], "b")
+
+    def test_active_ai_source_uses_only_active_editor_composition(self):
+        self.assertEqual(active_editor_source([]), ("empty", ""))
+        self.assertEqual(active_editor_source([{"path": "B.mp4", "enabled": True}]), ("single", "B.mp4"))
+        self.assertEqual(active_editor_source([{"path": "A.mp4"}, {"path": "B.mp4"}]), ("proxy", ""))
+
+    def test_async_results_resolve_stable_origin_id_or_discard(self):
+        manager = SequenceManager(); origin = manager.active; other = manager.create()
+        origin.state.update({"script": "A", "narration_path": "voice-a.wav", "preview_cues": [(0, 1, "A")]})
+        manager.activate(other.id); other.state.update({"script": "B", "narration_path": "voice-b.wav", "preview_cues": [(0, 1, "B")]})
+        target = find_origin_sequence(manager.sequences, origin.id)
+        target.state["script"] = "AI result A"
+        self.assertEqual(manager.active.state["script"], "B")
+        manager.close(origin.id)
+        self.assertIsNone(find_origin_sequence(manager.sequences, origin.id))
 
     def test_multi_sequence_project_schema_round_trip(self):
         manager = SequenceManager(); manager.create("Timeline 2")

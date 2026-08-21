@@ -65,6 +65,7 @@ from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 from core.media_library import migrate_global_media_library
+from core.sequence_context import active_editor_source, find_origin_sequence
 
 
 APP_NAME = "Machine Studio"
@@ -3703,8 +3704,8 @@ class MainWindow(QMainWindow):
         self.ai_video_path.setPlaceholderText("Chọn video cần AI viết kịch bản...")
         choose = QPushButton("📁 Chọn Video")
         choose.clicked.connect(self.choose_ai_video)
-        from_exporter = QPushButton("← Video từ Exporter")
-        from_exporter.clicked.connect(self.use_export_selection_for_ai)
+        from_exporter = QPushButton("← Video từ Editor")
+        from_exporter.clicked.connect(self.use_editor_timeline_for_ai)
         open_p = QPushButton("Mở Project")
         open_p.clicked.connect(self.open_ai_project)
         save_p = QPushButton("Lưu Project")
@@ -4455,7 +4456,24 @@ class MainWindow(QMainWindow):
 
         worker.finished.connect(cleanup)
 
-    def run_worker(self, title, fn, done):
+    def _deliver_sequence_job_result(self, sequence_id, apply_result, result):
+        if find_origin_sequence(self.sequence_manager.sequences, sequence_id) is None:
+            self.log_line(f"[JOB] origin_sequence={sequence_id} result=discarded reason=sequence_closed")
+            return
+        current_id = self.sequence_manager.active_sequence_id
+        if current_id == sequence_id:
+            apply_result(result); self.capture_active_sequence(); return
+        self.capture_active_sequence()
+        self.sequence_manager.activate(sequence_id); self.restore_active_sequence()
+        try:
+            apply_result(result)
+            self.capture_active_sequence()
+            origin_name = self.sequence_manager.active.name
+        finally:
+            self.sequence_manager.activate(current_id); self.restore_active_sequence(); self.refresh_sequence_tabs()
+        self.status(f"Đã hoàn tất tác vụ cho {origin_name}")
+
+    def run_worker(self, title, fn, done, sequence_id=None):
         if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "Đang chạy", "Hãy chờ tác vụ hiện tại hoàn tất.")
             return
@@ -4476,7 +4494,10 @@ class MainWindow(QMainWindow):
             self.progress.setRange(0, 100)
             self.progress.setValue(100)
             try:
-                done(result)
+                if sequence_id:
+                    self._deliver_sequence_job_result(sequence_id, done, result)
+                else:
+                    done(result)
             except Exception:
                 tb = traceback.format_exc()
                 self.log_line("[RESULT HANDLER ERROR]\n" + tb)
@@ -4735,16 +4756,35 @@ class MainWindow(QMainWindow):
         if path:
             self.set_ai_video(path)
 
-    def use_export_selection_for_ai(self):
-        path = self.current_video()
-        if not path:
-            QMessageBox.warning(
-                self, "AI Studio",
-                "Chưa chọn video ở Video Exporter."
-            )
+    def use_editor_timeline_for_ai(self):
+        clips = [dict(clip) for clip in self.editor_clips if clip.get("enabled", True)]
+        source_mode, source_path = active_editor_source(clips)
+        if source_mode == "empty":
+            QMessageBox.warning(self, "AI Studio", "Timeline hiện tại chưa có video.")
             return
-        self.set_ai_video(path)
-        self.status("AI Studio đã nhận video đang chọn từ Exporter.")
+        sequence_id = self.sequence_manager.active_sequence_id
+        if source_mode == "single":
+            self._set_active_ai_source(source_path)
+            return
+        workspace = Path(self.project.workspace) if self.project.workspace else ROOT / "preview_cache"
+        proxy = workspace / f"analysis_proxy_{sequence_id}.mp4"
+        def job(progress, log):
+            result = editor_engine.render_timeline(clips, str(proxy), preview=True, log=log, process_holder=self.process_holder)
+            progress(1, 1); return result
+        def done(path): self._set_active_ai_source(path)
+        self.run_worker("Đang tạo proxy phân tích cho Timeline hiện tại...", job, done, sequence_id=sequence_id)
+
+    # Backward-compatible action name; all callers now resolve the active editor timeline.
+    def use_export_selection_for_ai(self): self.use_editor_timeline_for_ai()
+
+    def _set_active_ai_source(self, path):
+        if not path:
+            QMessageBox.warning(self, "AI Studio", "Timeline hiện tại chưa có video.")
+            return
+        path = str(Path(path)); self.project.video_path = path
+        if not self.project.workspace: self.project.workspace = str(self.project_workspace_for(path))
+        self.ai_video_path.setText(path); self.schedule_autosave()
+        self.status(f"AI Studio đang dùng video từ {self.sequence_manager.active.name}.")
 
     def set_ai_video(self, path: str):
         path = str(Path(path))
@@ -4834,6 +4874,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "AI", "Hãy chọn video trước.")
             return
 
+        origin_sequence_id = self.sequence_manager.active_sequence_id
+        origin_project = deepcopy(self.project)
+        origin_project.video_path = video
         config = self.current_ai_config()
         if not config.api_key:
             QMessageBox.warning(
@@ -4857,12 +4900,12 @@ class MainWindow(QMainWindow):
         audio_path = workspace / "fast_source_audio.wav"
 
         def job(progress, log):
-            info = ffm.probe(self.project.video_path)
-            self.project.duration = info["duration"]
-            _, interval = self._adaptive_ai_sampling(self.project.duration)
-            self.project.interval = interval
+            info = ffm.probe(origin_project.video_path)
+            origin_project.duration = info["duration"]
+            _, interval = self._adaptive_ai_sampling(origin_project.duration)
+            origin_project.interval = interval
             log(
-                f"[AI FAST] duration={self.project.duration:.1f}s | "
+                f"[AI FAST] duration={origin_project.duration:.1f}s | "
                 f"interval={interval:.1f}s | provider={config.provider} | model={model}"
             )
             if config.provider != "Google Gemini":
@@ -4871,44 +4914,45 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
-            self.project.scenes = ffm.extract_frames(
-                self.project.video_path,
+            origin_project.scenes = ffm.extract_frames(
+                origin_project.video_path,
                 str(frames_dir),
                 interval,
                 width=720,
             )
             progress(1, 3)
 
-            self.project.source_audio = ""
+            origin_project.source_audio = ""
             if include_audio and info.get("has_audio"):
-                self.project.source_audio = ffm.extract_audio(
-                    self.project.video_path, str(audio_path)
+                origin_project.source_audio = ffm.extract_audio(
+                    origin_project.video_path, str(audio_path)
                 )
 
             log(
-                f"[AI FAST] frames={len(self.project.scenes)} | "
+                f"[AI FAST] frames={len(origin_project.scenes)} | "
                 f"source_audio={'YES' if include_audio else 'NO'}"
             )
             result = ai.fast_analyze_and_script(
                 config=config,
-                scenes=self.project.scenes,
+                scenes=origin_project.scenes,
                 market=market,
                 style=style,
-                audio_path=self.project.source_audio if include_audio else "",
+                audio_path=origin_project.source_audio if include_audio else "",
                 log=log,
             )
             progress(2, 3)
 
-            self.project.topic = result.get("topic", "")
-            self.project.analysis_summary = result.get("summary", "")
-            self.project.transcript = result.get("transcript", "")
-            self.project.scenes = result.get("scenes", self.project.scenes)
-            for scene in self.project.scenes:
-                scene.voice_role = assign_role(style, scene.index, len(self.project.scenes), getattr(scene, "voice_role", ""))
+            origin_project.topic = result.get("topic", "")
+            origin_project.analysis_summary = result.get("summary", "")
+            origin_project.transcript = result.get("transcript", "")
+            origin_project.scenes = result.get("scenes", origin_project.scenes)
+            for scene in origin_project.scenes:
+                scene.voice_role = assign_role(style, scene.index, len(origin_project.scenes), getattr(scene, "voice_role", ""))
             progress(3, 3)
             return result
 
         def done(_):
+            self.project = origin_project
             self.ai_summary.setPlainText(self.project.analysis_summary)
             self.transcript.setPlainText(self.project.transcript)
             self.refresh_scene_table()
@@ -4926,7 +4970,7 @@ class MainWindow(QMainWindow):
                 "Bạn có thể sửa câu trong Timeline; mọi thay đổi tiếp tục được auto-save."
             )
 
-        self.run_worker("AI đang hiểu video + viết kịch bản...", job, done)
+        self.run_worker("AI đang hiểu video + viết kịch bản...", job, done, sequence_id=origin_sequence_id)
 
     def refresh_scene_table(self):
         self.scene_table.blockSignals(True)
@@ -4975,7 +5019,7 @@ class MainWindow(QMainWindow):
             self.schedule_autosave()
 
     def analyze_voice_roles_again(self):
-        self.sync_scene_table(); style = self.current_ai_style_metadata(); config = self.current_ai_config()
+        self.sync_scene_table(); style = self.current_ai_style_metadata(); config = self.current_ai_config(); origin_sequence_id = self.sequence_manager.active_sequence_id
         segments = [{"id": str(scene.index), "text": scene.en_voice, "speaker_role": "", "role_locked": False} for scene in self.project.scenes if scene.en_voice.strip()]
         if not segments: QMessageBox.information(self, "Voice Roles", "Chưa có kịch bản để phân tích."); return
         def job(progress, log):
@@ -4986,7 +5030,7 @@ class MainWindow(QMainWindow):
                 item = by_id.get(str(scene.index))
                 if item: scene.voice_role = str(item.get("speaker_role", scene.voice_role)); scene.voice_role_confidence = float(item.get("confidence", 0)); scene.voice_role_locked = False
             self.refresh_scene_table(); self.autosave_project(); self.status("AI đã phân tích lại vai giọng đọc.")
-        self.run_worker("AI đang phân tích vai giọng đọc...", job, done)
+        self.run_worker("AI đang phân tích vai giọng đọc...", job, done, sequence_id=origin_sequence_id)
 
     def transfer_ai_to_exporter(self, switch_tab=False):
         if self.project.video_path:
@@ -5691,7 +5735,7 @@ class MainWindow(QMainWindow):
             self.log_line("[AUTO SUB TOGGLE ERROR]\n" + traceback.format_exc())
 
     def detect_source_subtitle_zone(self):
-        source = self.current_video() or self.project.video_path
+        source = next((str(clip.get("path", "")) for clip in self.editor_clips if clip.get("enabled", True)), "")
         if not source or not Path(source).exists():
             self.auto_sub_status.setText("Auto Sub: chưa chọn video")
             return
@@ -5706,6 +5750,7 @@ class MainWindow(QMainWindow):
         def job(progress, log):
             return subtitle_detector.detect_source_subtitle_zone(source, samples=7)
 
+        origin_sequence_id = self.sequence_manager.active_sequence_id
         worker = Worker(job)
         self.auto_detect_worker = worker
         self._retain_worker(worker)
@@ -5734,8 +5779,8 @@ class MainWindow(QMainWindow):
         def enable_button():
             self.auto_sub_detect_btn.setEnabled(True)
 
-        worker.done.connect(done)
-        worker.error.connect(err)
+        worker.done.connect(lambda zone: self._deliver_sequence_job_result(origin_sequence_id, done, zone))
+        worker.error.connect(lambda tb: self._deliver_sequence_job_result(origin_sequence_id, err, tb))
         worker.finished.connect(enable_button)
         worker.start()
 
@@ -6452,6 +6497,9 @@ class MainWindow(QMainWindow):
 
     def export_generate_voice(self):
         self.sync_scene_table()
+        origin_sequence_id = self.sequence_manager.active_sequence_id
+        origin_duration = self.project.duration
+        origin_video_path = self.project.video_path
         script_scenes = [
             s for s in self.project.scenes if (s.en_voice or "").strip()
         ]
@@ -6655,8 +6703,8 @@ class MainWindow(QMainWindow):
                 chunks,
                 str(timeline),
                 total_duration=(
-                    self.project.duration
-                    or ffm.probe(self.project.video_path)["duration"]
+                    origin_duration
+                    or ffm.probe(origin_video_path)["duration"]
                 ),
             )
 
@@ -6767,13 +6815,17 @@ class MainWindow(QMainWindow):
             f"{selected_engine} đang tạo voice theo từng timeline...",
             job,
             done,
+            sequence_id=origin_sequence_id,
         )
         if self.worker is not None:
-            self.worker.error.connect(lambda _tb, source=previous_narration: self.replace_live_narration_source(source))
+            self.worker.error.connect(
+                lambda _tb, source=previous_narration, sid=origin_sequence_id:
+                self._deliver_sequence_job_result(sid, self.replace_live_narration_source, source)
+            )
 
 
     def separate_original_vocals(self):
-        src = self.current_video() or self.project.video_path
+        src = next((str(clip.get("path", "")) for clip in self.editor_clips if clip.get("enabled", True)), "")
         if not src:
             QMessageBox.warning(self, "Tách giọng", "Chưa chọn video.")
             return
@@ -6792,7 +6844,7 @@ class MainWindow(QMainWindow):
             self.refresh_live_audio_sources()
             self.schedule_autosave()
 
-        self.run_worker("Đang tách giọng gốc bằng Demucs...", job, done)
+        self.run_worker("Đang tách giọng gốc bằng Demucs...", job, done, sequence_id=self.sequence_manager.active_sequence_id)
 
     # ==================================================================
     # SUBTITLE / TRANSLATION
@@ -7526,7 +7578,7 @@ class MainWindow(QMainWindow):
             )
             self.schedule_processed_preview()
 
-        self.run_worker("AI đang dịch subtitle...", job, done)
+        self.run_worker("AI đang dịch subtitle...", job, done, sequence_id=self.sequence_manager.active_sequence_id)
 
     # ==================================================================
     # EXPORT STATE / RENDER
