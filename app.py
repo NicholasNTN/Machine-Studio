@@ -54,6 +54,7 @@ from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle
 from editor.command_manager import TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
+from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 
 
 APP_NAME = "Machine Studio"
@@ -1486,6 +1487,10 @@ class MainWindow(QMainWindow):
 
         self.tts_voice = QComboBox()
         self.tts_voice.setEditable(True)
+        self.tts_voice_b_label = QLabel("VOICE B")
+        self.tts_voice_b = QComboBox(); self.tts_voice_b.setEditable(True)
+        self.tts_voice_b_try = QPushButton("Test Voice B")
+        self.tts_voice_b_try.clicked.connect(lambda: self.preview_piper_voice(self.tts_voice_b.currentText().strip()))
 
         self.tts_voice_manager = QPushButton("Chọn giọng...")
         self.tts_voice_manager.clicked.connect(
@@ -1545,9 +1550,13 @@ class MainWindow(QMainWindow):
         vg.addWidget(QLabel("Engine"), 1, 0)
         vg.addWidget(self.tts_engine, 1, 1, 1, 3)
 
-        vg.addWidget(QLabel("Giọng"), 2, 0)
+        self.tts_voice_a_label = QLabel("Giọng")
+        vg.addWidget(self.tts_voice_a_label, 2, 0)
         vg.addWidget(self.tts_voice, 2, 1, 1, 2)
         vg.addWidget(self.tts_voice_manager, 2, 3)
+        vg.addWidget(self.tts_voice_b_label, 11, 0)
+        vg.addWidget(self.tts_voice_b, 11, 1, 1, 2)
+        vg.addWidget(self.tts_voice_b_try, 11, 3)
 
         piper_actions = QHBoxLayout()
         piper_actions.addWidget(self.piper_download_voice)
@@ -4003,6 +4012,7 @@ class MainWindow(QMainWindow):
             0,
             lambda v=saved_voice: self.tts_voice.setCurrentText(v),
         )
+        QTimer.singleShot(0, lambda v=d.get("tts_voice_b", ""): self.tts_voice_b.setCurrentText(v))
 
         self.output_dir.setText(
             d.get("output_dir", str(ROOT / "exports"))
@@ -4049,6 +4059,7 @@ class MainWindow(QMainWindow):
             "voice_style": self.voice_style.toPlainText().strip(),
             "tts_engine": self.tts_engine.currentText().strip(),
             "tts_voice": self.tts_voice.currentText().strip(),
+            "tts_voice_b": self.tts_voice_b.currentText().strip(),
             "output_dir": self.output_dir.text().strip(),
             "download_dir": self.dl_dir.text().strip(),
             "cookies_browser": self.cookies_browser.currentText().strip(),
@@ -4411,6 +4422,12 @@ class MainWindow(QMainWindow):
                     "Phong cách tùy chỉnh — giữ tên tiếng Anh trong prompt.",
                 )
             )
+        roles = dual_voice_roles(str(style_name))
+        if hasattr(self, "tts_voice_b"):
+            dual = roles is not None
+            self.tts_voice_b_label.setVisible(dual); self.tts_voice_b.setVisible(dual); self.tts_voice_b_try.setVisible(dual)
+            self.tts_voice_a_label.setText(roles[0][1] if dual else "Giọng")
+            if dual: self.tts_voice_b_label.setText(roles[1][1])
 
     def ai_fast_pipeline(self):
         video = self.ai_video_path.text().strip()
@@ -4487,6 +4504,8 @@ class MainWindow(QMainWindow):
             self.project.analysis_summary = result.get("summary", "")
             self.project.transcript = result.get("transcript", "")
             self.project.scenes = result.get("scenes", self.project.scenes)
+            for scene in self.project.scenes:
+                scene.voice_role = assign_role(style, scene.index, len(self.project.scenes), getattr(scene, "voice_role", ""))
             progress(3, 3)
             return result
 
@@ -5770,6 +5789,11 @@ class MainWindow(QMainWindow):
         self.tts_fallback_voice.setVisible(is_gemini)
 
         self.refresh_piper_status()
+        previous_b = self.tts_voice_b.currentText().strip()
+        self.tts_voice_b.clear()
+        for index in range(self.tts_voice.count()): self.tts_voice_b.addItem(self.tts_voice.itemText(index))
+        if previous_b and self.tts_voice_b.findText(previous_b) >= 0: self.tts_voice_b.setCurrentText(previous_b)
+        elif self.tts_voice_b.count(): self.tts_voice_b.setCurrentIndex(min(1, self.tts_voice_b.count() - 1))
 
     def _replace_tts_voice_items(self, items, preferred=""):
         self.tts_voice.blockSignals(True)
@@ -5957,6 +5981,8 @@ class MainWindow(QMainWindow):
 
         selected_engine = self.tts_engine.currentText()
         selected_voice = self.tts_voice.currentText().strip()
+        selected_voice_b = self.tts_voice_b.currentText().strip() or selected_voice
+        selected_style = self.script_style.currentText() if hasattr(self, "script_style") else ""
         speed = self.tts_speed.value()
         google_tts_key = self.tts_api_key.text().strip()
         gemini_model = self.tts_model.currentText().strip()
@@ -6054,6 +6080,8 @@ class MainWindow(QMainWindow):
 
             for i, scene in enumerate(script_scenes):
                 text = scene.en_voice.strip()
+                if not fallback_used:
+                    active_voice = voice_for_role(getattr(scene, "voice_role", "single"), selected_voice, selected_voice_b, selected_style)
 
                 # Extension follows the ACTUAL engine for each scene.
                 ext = ".mp3" if "Edge" in active_engine else ".wav"
@@ -6128,6 +6156,7 @@ class MainWindow(QMainWindow):
                     "vi_text": scene.vi_voice.strip(),
                     "tts_engine": active_engine,
                     "tts_voice": active_voice,
+                    "voice_role": getattr(scene, "voice_role", "single"),
                 })
                 progress(i + 1, total)
 
@@ -6153,6 +6182,7 @@ class MainWindow(QMainWindow):
                 if source:
                     item["tts_engine"] = source.get("tts_engine", "")
                     item["tts_voice"] = source.get("tts_voice", "")
+                    item["voice_role"] = source.get("voice_role", "single")
 
             manifest_path = workspace / "voice_manifest.json"
             manifest_path.write_text(

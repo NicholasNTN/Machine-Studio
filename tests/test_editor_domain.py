@@ -11,6 +11,7 @@ from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_r
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core import subtitle_engine
+from core.script_roles import assign_role, voice_for_role
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -39,6 +40,12 @@ class EditorDomainTests(unittest.TestCase):
     def test_subtitle_preset_library_is_accessible(self):
         self.assertGreaterEqual(len(subtitle_engine.list_presets()), 48)
         self.assertTrue(all(subtitle_engine.preset_category(name) for name in subtitle_engine.list_presets()))
+
+    def test_dual_voice_role_assignment(self):
+        roles = [assign_role("Before and after", index, 4) for index in range(4)]
+        self.assertEqual(roles, ["before", "before", "after", "after"])
+        self.assertEqual(voice_for_role("after", "A", "B", "Before and after"), "B")
+        self.assertEqual(voice_for_role("single", "A", "B", "Factory documentary"), "A")
 
     def test_non_video_content_extends_trimmed_video_duration(self):
         state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])

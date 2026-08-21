@@ -8,6 +8,7 @@ import wave
 from typing import Callable, Optional
 
 from .models import Scene
+from .script_roles import assign_role, dual_voice_roles
 
 
 class GeminiError(RuntimeError):
@@ -144,6 +145,8 @@ def fast_analyze_and_script(
 
     c = _client(api_key)
 
+    roles = dual_voice_roles(style)
+    role_rule = (f'For every scene include "voice_role" using only "{roles[0][0]}" or "{roles[1][0]}". Keep each narrative section on its semantic role; do not alternate randomly.' if roles else 'Use "voice_role":"single" for every scene.')
     prompt = f"""You are the single-pass video analyst and script writer for Machine Studio.
 
 TARGET MARKET: {market}
@@ -164,6 +167,7 @@ Do ALL tasks in one pass:
 9. Never fabricate exact specifications, prices, speeds, capacities, temperatures,
    dates, or names unless clearly supported by visible/audio evidence.
 10. Also provide a Vietnamese translation so the editor can verify the meaning.
+11. {role_rule}
 
 Return ONLY one JSON object exactly in this shape:
 {{
@@ -178,6 +182,7 @@ Return ONLY one JSON object exactly in this shape:
       "source_meaning": "concise meaning of visible/source information",
       "en_voice": "original US English narration",
       "vi_voice": "Vietnamese translation"
+      ,"voice_role": "role metadata"
     }}
   ]
 }}
@@ -234,6 +239,7 @@ IMPORTANT: Return one scene item for EVERY supplied frame index.
         s.source_meaning = str(item.get("source_meaning", "") or "").strip()
         s.en_voice = str(item.get("en_voice", "") or "").strip()
         s.vi_voice = str(item.get("vi_voice", "") or "").strip()
+        s.voice_role = assign_role(style, s.index, len(scenes), str(item.get("voice_role", "") or "").strip())
 
     return {
         "topic": str(obj.get("topic", "") or "").strip(),
@@ -385,6 +391,8 @@ def generate_script(
             }
             for s in batch
         ]
+        roles = dual_voice_roles(style)
+        role_rule = (f'Include voice_role using only "{roles[0][0]}" or "{roles[1][0]}" and keep semantic sections together.' if roles else 'Use voice_role "single".')
         prompt = f"""Write ORIGINAL voice-over narration for a transformed educational/review video.
 
 Target market: {market}
@@ -410,10 +418,11 @@ Rules:
 - Avoid repetitive phrases.
 - English narration must fit the scene duration.
 - Also provide Vietnamese translation for checking.
+- {role_rule}
 - Output ONLY JSON array.
 
 [
- {{"index":0,"en_voice":"...","vi_voice":"..."}}
+ {{"index":0,"en_voice":"...","vi_voice":"...","voice_role":"..."}}
 ]
 """
         r = _call(lambda: c.interactions.create(
@@ -430,6 +439,7 @@ Rules:
             item = by.get(s.index, {})
             s.en_voice = str(item.get("en_voice", "")).strip()
             s.vi_voice = str(item.get("vi_voice", "")).strip()
+            s.voice_role = assign_role(style, s.index, total, str(item.get("voice_role", "") or "").strip())
         if progress:
             progress(min(pos + len(batch), total), total)
     return scenes
