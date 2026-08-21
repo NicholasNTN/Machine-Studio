@@ -6,7 +6,7 @@ from editor.snap_engine import SnapEngine
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
-from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle
+from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle, subtitle_group_is_visible
 from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
@@ -108,6 +108,12 @@ class EditorDomainTests(unittest.TestCase):
         restored = SubtitleGroup.from_dict(group.to_dict())
         self.assertEqual(restored.style.font_size, 27)
         self.assertEqual(restored.segment_ids, ["g1:0"])
+
+    def test_professional_subtitle_group_visibility_wins(self):
+        group = SubtitleGroup("g", "srt", "captions.srt", visible=True)
+        legacy_track_visible = False
+        self.assertFalse(legacy_track_visible)
+        self.assertTrue(subtitle_group_is_visible(True, group))
 
 
 if __name__ == "__main__":

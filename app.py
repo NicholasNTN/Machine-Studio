@@ -51,7 +51,7 @@ from ui.task_progress import TaskProgress
 from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
 from editor.timeline_item import TimelineItem, TimelineItemKind
-from editor.subtitle_group import SubtitleGroupStyle
+from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
 from editor.video_transform import VideoTransform
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
@@ -1624,6 +1624,7 @@ class MainWindow(QMainWindow):
         self.sub_enabled = QCheckBox("Bật phụ đề")
         self.sub_enabled.setChecked(False)
         self.sub_enabled.toggled.connect(self.update_subtitle_preview_style)
+        self.sub_enabled.toggled.connect(self.set_active_subtitle_visibility)
         sg.addWidget(self.sub_enabled)
 
         translate = QGroupBox("Dịch thuật")
@@ -2474,8 +2475,7 @@ class MainWindow(QMainWindow):
             else:
                 self.narration_volume.setValue(getattr(self, "_audio_track_volume_before_mute", 100))
         elif field == "visible":
-            if kind == "subtitle": self.sub_enabled.setChecked(bool(value))
-            elif kind == "effect": self.blur_enabled.setChecked(bool(value))
+            if kind == "effect": self.blur_enabled.setChecked(bool(value))
         self.update_live_overlay_state(); self.schedule_autosave()
 
     def _timeline_media_dropped(self, path, global_time, track_kind):
@@ -5681,11 +5681,12 @@ class MainWindow(QMainWindow):
             )
             cue_start = second
             cue_end = second
-            if not self.preview_sub_hidden and self.sub_enabled.isChecked():
+            subtitle_visible = self.active_subtitle_visible()
+            if subtitle_visible:
                 text, cue_start, cue_end = self.preview_subtitle_state_at(second)
 
             self.live_overlay.set_subtitle_state(
-                self.sub_enabled.isChecked() and not self.preview_sub_hidden,
+                subtitle_visible,
                 text,
                 self.current_subtitle_style(),
                 effect=self.sub_animation.currentText(),
@@ -6864,9 +6865,12 @@ class MainWindow(QMainWindow):
         self.sub_path.setText(str(out))
         self.sub_enabled.setChecked(True)
         self.load_subtitle_file(str(out), source_type="generated_voice")
+        group = self.editor_document.subtitle_groups.get(self._current_subtitle_group_id())
+        if group is not None: group.visible = True
         self.autosave_project()
 
         self.update_live_overlay_state()
+        self.log_line(f"[SUBTITLE] group={self._current_subtitle_group_id()} segments={len(self.preview_cues)} visible={bool(group and group.visible)} enabled={self.sub_enabled.isChecked()}")
         self.status(
             "Subtitle đã khớp voice và hiển thị trực tiếp trên Live Preview; "
             "render cache chạy ngầm."
@@ -6906,6 +6910,8 @@ class MainWindow(QMainWindow):
                 animation=style.animation,
             ),
         )
+        group = self.editor_document.subtitle_groups.get(self.subtitle_group_id)
+        if group is not None and self.sub_enabled.isChecked(): group.visible = True
         if p.suffix.lower() == ".srt":
             text = p.read_text(encoding="utf-8-sig", errors="replace")
             self.sub_editor.blockSignals(True)
@@ -6921,6 +6927,14 @@ class MainWindow(QMainWindow):
             self.preview_cues = []
         self.update_preview_subtitle(self.player.position() / 1000)
         self.editor_refresh_all()
+
+    def active_subtitle_visible(self):
+        group = self.editor_document.subtitle_groups.get(self._current_subtitle_group_id())
+        return subtitle_group_is_visible(self.sub_enabled.isChecked(), group)
+
+    def set_active_subtitle_visibility(self, enabled):
+        group = self.editor_document.subtitle_groups.get(self._current_subtitle_group_id())
+        if group is not None: group.visible = bool(enabled)
 
     def _current_subtitle_group_id(self):
         selection = self.editor_document.selection.current
@@ -7075,11 +7089,12 @@ class MainWindow(QMainWindow):
         cue_start = float(second or 0.0)
         cue_end = cue_start
 
-        if not self.preview_sub_hidden and self.sub_enabled.isChecked():
+        subtitle_visible = self.active_subtitle_visible()
+        if subtitle_visible:
             text, cue_start, cue_end = self.preview_subtitle_state_at(second)
 
         self.live_overlay.set_subtitle_state(
-            self.sub_enabled.isChecked() and not self.preview_sub_hidden,
+            subtitle_visible,
             text,
             self.current_subtitle_style(),
             effect=self.sub_animation.currentText(),

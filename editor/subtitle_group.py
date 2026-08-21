@@ -35,9 +35,15 @@ class SubtitleGroup:
     source_path: str
     style: SubtitleGroupStyle = field(default_factory=SubtitleGroupStyle)
     segment_ids: list[str] = field(default_factory=list)
+    visible: bool = True
 
     def to_dict(self): return asdict(self)
 
     @classmethod
     def from_dict(cls, data):
         values = dict(data or {}); values["style"] = SubtitleGroupStyle.from_dict(values.get("style", {})); return cls(**values)
+
+
+def subtitle_group_is_visible(enabled: bool, group: SubtitleGroup | None) -> bool:
+    """Professional group visibility is authoritative; legacy track state is irrelevant."""
+    return bool(enabled and group is not None and group.visible)
