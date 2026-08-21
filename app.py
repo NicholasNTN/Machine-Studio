@@ -194,11 +194,17 @@ class SubtitlePresetDialog(QDialog):
         title.setObjectName("dialogTitle")
         root.addWidget(title)
 
+        filters = QHBoxLayout()
+        self.search = QLineEdit(); self.search.setPlaceholderText("Search presets...")
+        self.category = QComboBox(); self.category.addItems(["ALL", *sorted(set(subtitle_engine.PRESET_CATEGORIES.values()))])
+        filters.addWidget(self.search, 1); filters.addWidget(self.category); root.addLayout(filters)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         holder = QWidget()
         grid = QGridLayout(holder)
 
+        self.preset_buttons = []
         for i, name in enumerate(subtitle_engine.list_presets()):
             style = subtitle_engine.PRESETS[name]
             button = QPushButton(f"Phụ đề mẫu\n{name}")
@@ -213,6 +219,7 @@ class SubtitlePresetDialog(QDialog):
             )
             button.clicked.connect(lambda checked=False, n=name: self.pick(n))
             grid.addWidget(button, i // 4, i % 4)
+            self.preset_buttons.append((name, subtitle_engine.preset_category(name), button))
 
         scroll.setWidget(holder)
         root.addWidget(scroll, 1)
@@ -220,6 +227,13 @@ class SubtitlePresetDialog(QDialog):
         close = QPushButton("Đóng")
         close.clicked.connect(self.reject)
         root.addWidget(close)
+        self.search.textChanged.connect(self.filter_presets)
+        self.category.currentTextChanged.connect(self.filter_presets)
+
+    def filter_presets(self, *_):
+        needle = self.search.text().strip().lower(); category = self.category.currentText()
+        for name, item_category, button in self.preset_buttons:
+            button.setVisible((not needle or needle in name.lower()) and (category == "ALL" or category == item_category))
 
     def pick(self, name):
         self.selected_name = name

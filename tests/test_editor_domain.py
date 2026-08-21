@@ -10,6 +10,7 @@ from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle
 from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
+from core import subtitle_engine
 
 
 class EditorDomainTests(unittest.TestCase):
@@ -34,6 +35,10 @@ class EditorDomainTests(unittest.TestCase):
 
     def test_downloader_filename_is_windows_safe(self):
         self.assertEqual(safe_output_filename('  bad:<video>?*.mp4. '), "bad__video___.mp4")
+
+    def test_subtitle_preset_library_is_accessible(self):
+        self.assertGreaterEqual(len(subtitle_engine.list_presets()), 48)
+        self.assertTrue(all(subtitle_engine.preset_category(name) for name in subtitle_engine.list_presets()))
 
     def test_non_video_content_extends_trimmed_video_duration(self):
         state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])

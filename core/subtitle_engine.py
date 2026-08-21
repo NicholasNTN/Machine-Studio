@@ -97,6 +97,25 @@ PRESETS: dict[str, SubtitleStyle] = {
     ),
 }
 
+# Original Machine Studio presets using only fields supported by Preview/ASS.
+_EXTRA_PRESET_SPECS = {
+    "CLEAN": [("Clean White", "#FFFFFF", "#000000"), ("Clean Bold", "#FFFFFF", "#101010"), ("White Shadow", "#FFFFFF", "#303030"), ("Black Box", "#FFFFFF", "#000000"), ("White Box", "#111111", "#FFFFFF"), ("Minimal Lower Third", "#F5F5F5", "#151515")],
+    "TRENDING / SOCIAL": [("Bold Yellow", "#FFE600", "#000000"), ("Yellow Punch", "#FFD400", "#151515"), ("Yellow Black Stroke", "#FFF000", "#000000"), ("TikTok White", "#FFFFFF", "#121212"), ("TikTok Yellow", "#FFE45B", "#161616"), ("Viral Bold", "#FFFFFF", "#000000"), ("Creator Pop", "#FF70B7", "#291020"), ("Punch Caption", "#FFFFFF", "#1B1B1B"), ("Modern Highlight", "#72E6FF", "#09222A"), ("Keyword Highlight", "#FFF36A", "#251E00")],
+    "GLOW / NEON": [("Neon Yellow", "#F7FF45", "#5A5600"), ("Neon Cyan", "#30F4FF", "#004C52"), ("Neon Blue", "#4B8DFF", "#071B4A"), ("Neon Purple", "#C65CFF", "#35004F"), ("Neon Red", "#FF4E5E", "#520008"), ("Soft Glow", "#E8F1FF", "#52709D")],
+    "CINEMATIC": [("Cinema White", "#F4F1E8", "#17130E"), ("Film Subtitle", "#EEE9DD", "#191919"), ("Dramatic", "#FFFFFF", "#300000"), ("Mystery", "#C9D1E8", "#080B13"), ("Documentary Gold", "#E6C86E", "#231A00"), ("Trailer Bold", "#FFFFFF", "#000000")],
+    "KARAOKE / WORD POP": [("Karaoke Yellow", "#FFE600", "#1C1800"), ("Karaoke Cyan", "#3DEBFF", "#002C32"), ("Karaoke Green", "#62F26D", "#06310A"), ("Karaoke Pink", "#FF6BC7", "#3A0827"), ("Word Pop Yellow", "#FFE85C", "#211B00"), ("Word Pop White", "#FFFFFF", "#111111"), ("Word Pop Cyan", "#60EFFF", "#003138"), ("Word Pop Orange", "#FF9C43", "#3D1900")],
+    "TECH / MACHINE CHANNEL": [("Industrial Yellow", "#FFD21F", "#191600"), ("Engineering Cyan", "#40DFF5", "#002B31"), ("Factory Orange", "#FF9D2E", "#301600"), ("Machine White", "#F2F5F7", "#20282D"), ("Blueprint Blue", "#7AC5FF", "#082542"), ("Warning Red", "#FF4B42", "#3A0500"), ("Steel Caption", "#D0D8DE", "#273139"), ("Construction Yellow", "#FFC928", "#2B2300")],
+    "NEWS / INFO": [("Breaking Red", "#FFFFFF", "#A60000"), ("Info Blue", "#FFFFFF", "#074EA3"), ("Statistic Yellow", "#FFE45C", "#172033"), ("Before Label", "#FFFFFF", "#9B2631"), ("After Label", "#FFFFFF", "#197648")],
+}
+
+PRESET_CATEGORIES = {name: "ORIGINAL" for name in PRESETS}
+for category, specs in _EXTRA_PRESET_SPECS.items():
+    for index, (name, primary, outline_color) in enumerate(specs):
+        boxed = name in {"Black Box", "White Box", "Breaking Red", "Info Blue", "Before Label", "After Label"}
+        animation = "Karaoke" if name.startswith("Karaoke") else "Word Pop Sync" if name.startswith("Word Pop") else "Pop" if category == "TRENDING / SOCIAL" else "Không"
+        PRESETS[name] = SubtitleStyle(preset_name=name, font_name="Arial", font_size=52 if ("Bold" in name or "Punch" in name) else 46, primary_color=primary, outline_color=outline_color, bold=not name.startswith("Film"), outline=0.0 if boxed else 3.0, shadow=2.0 if "Neon" in name or "Glow" in name else 1.0, background_box=boxed, background_color=outline_color, background_opacity=86, y_percent=84 if category in {"TRENDING / SOCIAL", "KARAOKE / WORD POP"} else 87, max_chars_per_line=28 if category == "TRENDING / SOCIAL" else 34, animation=animation, karaoke_color="#FFE600")
+        PRESET_CATEGORIES[name] = category
+
 
 def clone_preset(name: str) -> SubtitleStyle:
     style = PRESETS.get(name) or PRESETS["Documentary Clean"]
@@ -105,6 +124,10 @@ def clone_preset(name: str) -> SubtitleStyle:
 
 def list_presets() -> list[str]:
     return list(PRESETS.keys())
+
+
+def preset_category(name: str) -> str:
+    return PRESET_CATEGORIES.get(name, "ORIGINAL")
 
 
 def _hex_to_ass(hex_color: str, opacity: int = 100) -> str:
