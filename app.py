@@ -71,6 +71,7 @@ from core.media_library import migrate_global_media_library
 from core.sequence_context import active_editor_source, find_origin_sequence, sequence_narration_path
 from core.render_snapshot import build_render_snapshot
 from core.narration_state import begin_narration_generation, finish_narration_generation, resolve_export_narration
+from core.preview_result import cache_processed_preview_result
 
 
 APP_NAME = "Machine Studio"
@@ -2181,6 +2182,9 @@ class MainWindow(QMainWindow):
         try:
             self.player.stop(); self.pause_live_audio_tracks()
             self.project = self._project_from_payload(sequence.ai_project) if sequence.ai_project else AIProject()
+            self.processed_preview_path = str(self.project.processed_preview_path or "")
+            self.preview_pending_path = self.processed_preview_path if Path(self.processed_preview_path).is_file() else ""
+            self.preview_is_processed = False
             state = self._empty_sequence_state(); state.update(deepcopy(sequence.state or {}))
             self.editor_clips.clear(); self.editor_layers.clear(); self.preview_cues = []; self.blur_zone_list.clear()
             self.editor_document.subtitle_groups.clear(); self.sub_editor.clear(); self.sub_path.clear(); self.voice_file.clear(); self.narration_path = ""
@@ -8619,11 +8623,11 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-    def _preview_resolution(self):
-        target = ffm.parse_resolution(self.resolution.currentText())
+    def _preview_resolution(self, resolution, source):
+        target = ffm.parse_resolution(resolution)
         if not target:
             try:
-                info = ffm.probe(self.current_video())
+                info = ffm.probe(source)
                 target = (info["width"], info["height"])
             except Exception:
                 target = (1080, 1920)
@@ -8638,7 +8642,12 @@ class MainWindow(QMainWindow):
 
     def refresh_processed_preview(self, background=True):
         origin_sequence_id = self.sequence_manager.active_sequence_id
-        source = self.current_video() or self.project.video_path
+        self.capture_active_sequence()
+        snapshot = build_render_snapshot(self.sequence_manager.sequences, origin_sequence_id)
+        source = (
+            str(snapshot.clips[0].get("path", ""))
+            if snapshot.clips else self.current_video() or self.project.video_path
+        )
         if not source or not Path(source).exists():
             return
         if self.worker and self.worker.isRunning():
@@ -8658,10 +8667,10 @@ class MainWindow(QMainWindow):
         self.preview_dirty = False
         self._silent_save_sub_editor()
 
-        options = self.gather_export_options()
+        options = self.gather_export_options(snapshot)
         options = replace(
             options,
-            resolution=self._preview_resolution(),
+            resolution=self._preview_resolution(options.resolution, source),
             codec="H.264",
             encoder="CPU",
         )
@@ -8728,8 +8737,35 @@ class MainWindow(QMainWindow):
             if self.preview_dirty:
                 self.preview_render_timer.start()
 
-        worker.error.connect(lambda tb: self._deliver_sequence_job_result(origin_sequence_id, render_error, tb))
-        worker.done.connect(lambda path: self._deliver_sequence_job_result(origin_sequence_id, render_done, path))
+        def deliver_preview_error(tb):
+            if self.sequence_manager.active_sequence_id == origin_sequence_id:
+                render_error(tb)
+            else:
+                self.log_line(f"[BACKGROUND PREVIEW ERROR] sequence_id={origin_sequence_id}\n{tb[-3500:]}")
+
+        def deliver_preview_done(path):
+            try:
+                info = ffm.probe(path)
+                if info.get("duration", 0) <= 0 or info.get("width", 0) <= 0:
+                    raise RuntimeError("Preview proxy không hợp lệ.")
+            except Exception as e:
+                self.log_line(f"[BACKGROUND PREVIEW INVALID] sequence_id={origin_sequence_id} {e}")
+                return
+            should_display = cache_processed_preview_result(
+                self.sequence_manager.sequences, origin_sequence_id,
+                self.sequence_manager.active_sequence_id, path,
+            )
+            if find_origin_sequence(self.sequence_manager.sequences, origin_sequence_id) is None:
+                self.log_line(f"[BACKGROUND PREVIEW] sequence_id={origin_sequence_id} result=discarded reason=sequence_closed")
+                return
+            if not should_display:
+                self.log_line(f"[BACKGROUND PREVIEW] sequence_id={origin_sequence_id} result=cached_not_displayed")
+                return
+            render_done(path)
+            self.capture_active_sequence()
+
+        worker.error.connect(deliver_preview_error)
+        worker.done.connect(deliver_preview_done)
         worker.start()
 
     def cleanup_old_preview_proxies(self):

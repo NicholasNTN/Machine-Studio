@@ -2,6 +2,7 @@ import unittest
 import tempfile
 import json
 import sys
+import ast
 from unittest.mock import patch
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from core.sequence_context import sequence_narration_path
 from core.file_dialog_history import FileDialogHistory
 from core.render_snapshot import build_render_snapshot, snapshot_resolution
 from core.narration_state import begin_narration_generation, finish_narration_generation, resolve_export_narration
+from core.preview_result import cache_processed_preview_result
 from editor.text_style import TextStyle
 from editor.blur_zone import normalize_blur_zones
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -37,6 +39,37 @@ from core.models import AIProject
 
 
 class EditorDomainTests(unittest.TestCase):
+    def test_all_export_option_callers_pass_explicit_snapshot(self):
+        tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+        methods = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        gather = next(node for node in methods if node.name == "gather_export_options")
+        self.assertEqual([arg.arg for arg in gather.args.args], ["self", "snapshot"])
+        self.assertEqual(len(gather.args.defaults), 0)
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute) and node.func.attr == "gather_export_options"]
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(len(call.args) == 1 for call in calls))
+        refresh = next(node for node in methods if node.name == "refresh_processed_preview")
+        refresh_calls = [node for node in ast.walk(refresh) if isinstance(node, ast.Call)]
+        self.assertTrue(any(getattr(node.func, "id", "") == "build_render_snapshot" for node in refresh_calls))
+        resolution_calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute) and node.func.attr == "_preview_resolution"]
+        self.assertTrue(all(len(call.args) == 2 for call in resolution_calls))
+
+    def test_processed_preview_result_is_cached_without_cross_timeline_display(self):
+        manager = SequenceManager(); first = manager.active; second = manager.create()
+        manager.activate(second.id)
+        self.assertFalse(cache_processed_preview_result(manager.sequences, first.id, manager.active_sequence_id, "preview-a.mp4"))
+        self.assertEqual(first.ai_project["processed_preview_path"], "preview-a.mp4")
+        self.assertNotIn("processed_preview_path", second.ai_project)
+        self.assertTrue(cache_processed_preview_result(manager.sequences, second.id, manager.active_sequence_id, "preview-b.mp4"))
+        first.state = {"narration_path": "voice-a.wav", "resolution": "720x1280", "canvas_background": {"mode": "blur"}}
+        second.state = {"narration_path": "voice-b.wav", "resolution": "1920x1080", "canvas_background": {"mode": "solid"}}
+        options_a = build_render_snapshot(manager.sequences, first.id).export_options()
+        options_b = build_render_snapshot(manager.sequences, second.id).export_options()
+        self.assertEqual((options_a.narration_path, options_a.canvas_background_mode), ("voice-a.wav", "blur"))
+        self.assertEqual((options_b.narration_path, options_b.canvas_background_mode), ("voice-b.wav", "solid"))
+
     def test_preview_narration_is_export_truth_for_active_sequence(self):
         state = {"narration_path": "legacy.wav", "narration_source_path": "latest.wav",
                  "narration_synced_path": "stale.wav", "narration_revision": 2, "narration_synced_revision": 1}
