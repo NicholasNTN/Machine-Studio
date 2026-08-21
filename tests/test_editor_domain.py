@@ -11,7 +11,7 @@ from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_r
 from editor.blur_zone import BlurZone, source_zone_canvas_rect
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
-from core.audio_state import AudioState, replace_narration_source
+from core.audio_state import AudioState, replace_narration_source, audio_source_is_loadable
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -144,6 +144,7 @@ class EditorDomainTests(unittest.TestCase):
         replacement = replace_narration_source(state, "new-narration.wav")
         self.assertEqual(replacement.source, "new-narration.wav")
         self.assertEqual(replacement.state, state)
+        self.assertFalse(audio_source_is_loadable("missing-narration.wav"))
 
 
 if __name__ == "__main__":

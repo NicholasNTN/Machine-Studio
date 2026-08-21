@@ -50,6 +50,7 @@ from ui.export_dialog import ExportDialog, sanitize_windows_name
 from ui.task_progress import TaskProgress
 from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
+from services.playback_controller import PlaybackController
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible, active_subtitle_render_state
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
@@ -621,9 +622,9 @@ class MainWindow(QMainWindow):
         self.preview_render_timer.setInterval(4200)
         self.preview_render_timer.timeout.connect(self.refresh_processed_preview)
 
-        self.player = QMediaPlayer(self)
-        self.audio_output = QAudioOutput(self)
-        self.player.setAudioOutput(self.audio_output)
+        self.playback = PlaybackController(self)
+        self.player = self.playback.main_player
+        self.audio_output = self.playback.main_output
 
         # v1.0: decoded frames go to our own QWidget canvas.
         # This avoids native video-surface z-order issues on Windows.
@@ -636,17 +637,12 @@ class MainWindow(QMainWindow):
 
         # Live multi-track audio preview. These players stay synchronized with
         # the source video, so voice/music can be previewed without FFmpeg reload.
-        self.narration_player = QMediaPlayer(self)
-        self.narration_output = QAudioOutput(self)
-        self.narration_player.setAudioOutput(self.narration_output)
-
-        self.music_player = QMediaPlayer(self)
-        self.music_output = QAudioOutput(self)
-        self.music_player.setAudioOutput(self.music_output)
-
-        self.accompaniment_player = QMediaPlayer(self)
-        self.accompaniment_output = QAudioOutput(self)
-        self.accompaniment_player.setAudioOutput(self.accompaniment_output)
+        self.narration_player = self.playback.narration_player
+        self.narration_output = self.playback.narration_output
+        self.music_player = self.playback.music_player
+        self.music_output = self.playback.music_output
+        self.accompaniment_player = self.playback.accompaniment_player
+        self.accompaniment_output = self.playback.accompaniment_output
 
         self._live_sync_guard = False
 
@@ -4777,14 +4773,23 @@ class MainWindow(QMainWindow):
         same_source = (str(Path(current)) == str(Path(replacement.source))) if current and replacement.source else (current == replacement.source)
         if same_source:
             return
-        self.narration_player.stop()
-        self.narration_player.setAudioOutput(self.narration_output)
-        self.narration_player.setSource(QUrl.fromLocalFile(replacement.source) if replacement.source and Path(replacement.source).exists() else QUrl())
-        self.narration_output.setMuted(replacement.state.narration_muted)
-        self.narration_output.setVolume(max(0.0, min(1.0, replacement.state.narration_volume)))
+        self.narration_player, self.narration_output = self.playback.rebuild_narration(
+            replacement.source, volume=replacement.state.narration_volume,
+            muted=replacement.state.narration_muted,
+            status_callback=self.on_narration_media_status,
+        )
         self.update_live_audio_mix()
         self.log_audio_state("main")
         self.log_audio_state("narration")
+
+    def prepare_narration_regeneration(self, timeline_name="Timeline"):
+        self.pause_live_audio_tracks()
+        self.playback.detach_narration()
+        self.log_line(f"[AUDIO RELOAD] timeline={timeline_name} source=<detached-for-tts> player=True output=False muted={self.narration_output.isMuted()} volume={self.narration_output.volume():.3f}")
+
+    def log_audio_reload(self, timeline_name="Timeline"):
+        info = self.playback.narration_diagnostics()
+        self.log_line("[AUDIO RELOAD] " + " ".join([f"timeline={timeline_name}"] + [f"{key}={value}" for key, value in info.items()]))
 
     def on_narration_media_status(self, status):
         if status in (QMediaPlayer.LoadedMedia, QMediaPlayer.BufferedMedia):
@@ -6486,13 +6491,18 @@ class MainWindow(QMainWindow):
 
             self.autosave_project()
             self.refresh_live_audio_sources()
+            self.log_audio_reload(getattr(self, "active_sequence_name", "Timeline 1"))
             self.schedule_processed_preview()
 
+        previous_narration = self.voice_file.text().strip() or self.narration_path
+        self.prepare_narration_regeneration(getattr(self, "active_sequence_name", "Timeline 1"))
         self.run_worker(
             f"{selected_engine} đang tạo voice theo từng timeline...",
             job,
             done,
         )
+        if self.worker is not None:
+            self.worker.error.connect(lambda _tb, source=previous_narration: self.replace_live_narration_source(source))
 
 
     def separate_original_vocals(self):
