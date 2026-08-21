@@ -60,6 +60,7 @@ from editor.blur_zone import BlurZone
 from editor.sequence_manager import SequenceManager
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 from core.audio_state import AudioState, replace_narration_source
+from core.last_used_preferences import LastUsedPreferences
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 
@@ -566,6 +567,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self.settings = SettingsStore(ROOT)
+        self.last_used_preferences = LastUsedPreferences(self.settings.data)
         self.project = AIProject()
         self.workspace_project_path = ""
         self.queue: list[str] = []
@@ -662,6 +664,7 @@ class MainWindow(QMainWindow):
         self._build()
         self._style()
         self._load_settings_to_ui()
+        self._connect_last_used_preferences()
 
         self.player.positionChanged.connect(self.on_preview_position)
         self.player.durationChanged.connect(self.on_preview_duration)
@@ -777,6 +780,9 @@ class MainWindow(QMainWindow):
         self.media_panel.mediaAddRequested.connect(
             lambda path: self.editor_add_paths([path])
         )
+        self.media_panel.mediaRenameRequested.connect(self._rename_media_display)
+        self.media_panel.mediaRemoveRequested.connect(self._remove_media_from_bin)
+        self.media_panel.mediaRevealRequested.connect(self._reveal_media)
         self.thumbnail_service.ready.connect(self.media_panel.update_media_info)
         self.blur_tool_panel.itemSelected.connect(self._select_blur_from_tool)
 
@@ -802,6 +808,29 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(0)
         self._refresh_professional_panels()
 
+    def _connect_last_used_preferences(self):
+        widgets = (self.editor_layer_font, self.editor_layer_size, self.editor_layer_color,
+                   self.sub_preset, self.sub_font, self.sub_size, self.sub_color, self.sub_outline_color, self.sub_bold, self.sub_italic,
+                   self.sub_outline, self.sub_animation, self.tts_engine, self.tts_voice, self.tts_voice_b,
+                   self.tts_speed, self.narration_volume, self.blur_style, self.blur_opacity,
+                   self.preview_ratio_combo, self.resolution, self.codec)
+        for widget in widgets:
+            signal = getattr(widget, "currentTextChanged", None) or getattr(widget, "currentFontChanged", None) or getattr(widget, "valueChanged", None) or getattr(widget, "textChanged", None) or getattr(widget, "toggled", None)
+            if signal: signal.connect(self.remember_last_used_preferences)
+        self.video_editor_tab.splitterSizesChanged.connect(self.remember_last_used_preferences)
+
+    def remember_last_used_preferences(self, *args):
+        if self._restoring_state: return
+        self.last_used_preferences.update(
+            text_font=self.editor_layer_font.currentFont().family(), text_font_size=self.editor_layer_size.value(), text_color=self.editor_layer_color.text(),
+            subtitle_preset=self.sub_preset.currentText(), subtitle_font=self.sub_font.currentFont().family(), subtitle_size=self.sub_size.value(),
+            subtitle_color=self.sub_color.text(), subtitle_outline_color=self.sub_outline_color.text(), subtitle_outline=self.sub_outline.value(), subtitle_animation=self.sub_animation.currentText(), subtitle_bold=self.sub_bold.isChecked(), subtitle_italic=self.sub_italic.isChecked(),
+            voice_engine=self.tts_engine.currentText(), voice_a=self.tts_voice.currentText(), voice_b=self.tts_voice_b.currentText(), voice_speed=self.tts_speed.value(), voice_volume=self.narration_volume.value(),
+            blur_style=self.blur_style.currentText(), blur_strength=self.blur_opacity.value(), canvas_ratio=self.preview_ratio_combo.currentText(),
+            export_resolution=self.resolution.currentText(), export_codec=self.codec.currentText(), workspace_splitter_sizes=self.video_editor_tab.sizes(),
+        )
+        self.settings.save()
+
     def _import_media_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Import Media Folder")
         if not folder:
@@ -819,6 +848,19 @@ class MainWindow(QMainWindow):
             self.music_file.setText(path)
             self._refresh_professional_panels()
             self.schedule_autosave()
+
+    def _rename_media_display(self, path, name):
+        self.media_panel.set_display_name(path, name); self.schedule_autosave()
+
+    def _remove_media_from_bin(self, path):
+        self.queue = [item for item in self.queue if str(item) != str(path)]
+        self._refresh_professional_panels(); self.schedule_autosave()
+
+    def _reveal_media(self, path):
+        target = Path(path)
+        if os.name == "nt":
+            import subprocess; subprocess.Popen(["explorer", "/select,", str(target)])
+        else: QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.parent)))
 
     def _refresh_professional_panels(self):
         if not hasattr(self, "media_panel"):
@@ -2052,7 +2094,7 @@ class MainWindow(QMainWindow):
         state = self.export_state_dict()
         state.update({"preview_cues": list(self.preview_cues), "subtitle_editor_text": self.sub_editor.toPlainText(),
                       "subtitle_path": self.sub_path.text().strip(), "narration_path": self.narration_path,
-                      "media_bin": list(self.queue)})
+                      "media_bin": list(self.queue), "media_display_names": dict(self.media_panel._display_names)})
         sequence.state = deepcopy(state); sequence.ai_project = self._project_payload()
         sequence.playhead = self.editor_current_time(); sequence.dirty = bool(self.editor_clips or self.editor_layers or self.preview_cues or self.narration_path)
 
@@ -2060,7 +2102,8 @@ class MainWindow(QMainWindow):
         return {"editor_clips": [], "editor_layers": [], "blur_zones": [], "subtitle_groups": {},
                 "subtitle_group_id": "", "preview_cues": [], "subtitle_editor_text": "", "subtitle_path": "",
                 "narration_path": "", "sub_enabled": False, "blur_enabled": False, "auto_cover_source_subtitle": False,
-                "logo_enabled": False, "overlay_enabled": False, "editor_use_timeline": True, "media_bin": list(self.queue)}
+                "logo_enabled": False, "logo_path": "", "overlay_enabled": False, "overlay_text": "", "music_file": "",
+                "editor_use_timeline": True, "media_bin": list(self.queue), "media_display_names": {}}
 
     def restore_active_sequence(self):
         sequence = self.sequence_manager.active; self._switching_sequence = True; self._restoring_state = True
@@ -2071,10 +2114,11 @@ class MainWindow(QMainWindow):
             self.editor_clips.clear(); self.editor_layers.clear(); self.preview_cues = []; self.blur_zone_list.clear()
             self.editor_document.subtitle_groups.clear(); self.sub_editor.clear(); self.sub_path.clear(); self.voice_file.clear(); self.narration_path = ""
             self.apply_export_state(state)
+            self._restoring_state = True
             self.preview_cues = [tuple(cue) for cue in state.get("preview_cues", [])]
             self.sub_editor.setPlainText(str(state.get("subtitle_editor_text", "")))
             self.sub_path.setText(str(state.get("subtitle_path", ""))); self.narration_path = str(state.get("narration_path", "")); self.voice_file.setText(self.narration_path)
-            self.queue = list(state.get("media_bin", self.queue)); self._refresh_professional_panels()
+            self.queue = list(state.get("media_bin", self.queue)); self.media_panel._display_names = dict(state.get("media_display_names", {})); self._refresh_professional_panels()
             self.ai_video_path.setText(self.project.video_path); self.ai_summary.setPlainText(self.project.analysis_summary); self.transcript.setPlainText(self.project.transcript); self.refresh_scene_table()
             self.editor_document.commands.stack = self._sequence_undo_stacks.setdefault(sequence.id, QUndoStack(self))
             self.editor_refresh_all()
@@ -2107,6 +2151,13 @@ class MainWindow(QMainWindow):
         self.capture_active_sequence(); sequence = self.sequence_manager.create(); sequence.state = self._empty_sequence_state()
         self._sequence_undo_stacks[sequence.id] = QUndoStack(self); self.refresh_sequence_tabs(); self.restore_active_sequence()
 
+    def rename_active_sequence(self, name):
+        self.sequence_manager.rename(self.sequence_manager.active_sequence_id, name); self.refresh_sequence_tabs()
+
+    def duplicate_sequence(self, sequence_id=None):
+        self.capture_active_sequence(); copy = self.sequence_manager.duplicate(sequence_id or self.sequence_manager.active_sequence_id)
+        self._sequence_undo_stacks[copy.id] = QUndoStack(self); self.refresh_sequence_tabs(); self.restore_active_sequence(); return copy
+
     def close_sequence_at(self, index):
         sequence_id = self.sequence_tabs.tabData(index)
         if not sequence_id or sequence_id == "__new__": return
@@ -2121,9 +2172,9 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.sequence_tabs.mapToGlobal(pos))
         if chosen == rename:
             sequence = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); name, ok = QInputDialog.getText(self, "Rename Timeline", "Name", text=sequence.name)
-            if ok and name.strip(): sequence.name = name.strip(); self.refresh_sequence_tabs()
+            if ok and name.strip(): self.sequence_manager.rename(sequence_id, name); self.refresh_sequence_tabs()
         elif chosen == duplicate:
-            self.capture_active_sequence(); copy = self.sequence_manager.duplicate(sequence_id); self._sequence_undo_stacks[copy.id] = QUndoStack(self); self.refresh_sequence_tabs(); self.restore_active_sequence()
+            self.duplicate_sequence(sequence_id)
         elif chosen == close: self.close_sequence_at(index)
         elif chosen == close_others:
             self.capture_active_sequence(); keep = next(s for s in self.sequence_manager.sequences if s.id == sequence_id); self.sequence_manager.sequences[:] = [keep]; self.sequence_manager.active_sequence_id = keep.id; self.refresh_sequence_tabs(); self.restore_active_sequence()
@@ -2229,7 +2280,7 @@ class MainWindow(QMainWindow):
         zoom_box.addWidget(QLabel("Zoom"))
         self.editor_zoom = QSlider(Qt.Vertical)
         self.editor_zoom.setRange(8, 80)
-        self.editor_zoom.setValue(24)
+        self.editor_zoom.setValue(14)
         self.editor_zoom.valueChanged.connect(
             self.editor_timeline.set_zoom
         )
@@ -3272,6 +3323,9 @@ class MainWindow(QMainWindow):
                 or (self.player.duration() / 1000.0),
             ),
         )
+        defaults = self.last_used_preferences.text_defaults()
+        for key in ("font", "font_size", "color"):
+            if key in defaults: layer["font_name" if key == "font" else key] = defaults[key]
         self.editor_layers.append(layer)
         self.editor_selected_layer = len(self.editor_layers) - 1
         if hasattr(self, "settings_panel"):
@@ -4275,6 +4329,27 @@ class MainWindow(QMainWindow):
             saved_index = self.script_style.findData(saved_style.id)
             if saved_index >= 0: self.script_style.setCurrentIndex(saved_index)
             self.update_script_style_translation(saved_style.display_name)
+        last = self.last_used_preferences.values
+        if last:
+            self.editor_layer_font.setCurrentFont(QFont(str(last.get("text_font", "Arial"))))
+            self.editor_layer_size.setValue(float(last.get("text_font_size", 52)))
+            self.editor_layer_color.setText(str(last.get("text_color", "#FFFFFF")))
+            self.sub_preset.setCurrentText(str(last.get("subtitle_preset", self.sub_preset.currentText())))
+            self.sub_font.setCurrentFont(QFont(str(last.get("subtitle_font", self.sub_font.currentFont().family()))))
+            self.sub_size.setValue(int(last.get("subtitle_size", self.sub_size.value())))
+            self.sub_bold.setChecked(bool(last.get("subtitle_bold", self.sub_bold.isChecked())))
+            self.sub_italic.setChecked(bool(last.get("subtitle_italic", self.sub_italic.isChecked())))
+            self.tts_engine.setCurrentText(str(last.get("voice_engine", self.tts_engine.currentText())))
+            QTimer.singleShot(0, lambda value=str(last.get("voice_a", "")): self.tts_voice.setCurrentText(value) if value else None)
+            QTimer.singleShot(0, lambda value=str(last.get("voice_b", "")): self.tts_voice_b.setCurrentText(value) if value else None)
+            self.tts_speed.setValue(float(last.get("voice_speed", self.tts_speed.value())))
+            self.blur_style.setCurrentText(str(last.get("blur_style", self.blur_style.currentText())))
+            self.blur_opacity.setValue(int(last.get("blur_strength", self.blur_opacity.value())))
+            self.preview_ratio_combo.setCurrentText(str(last.get("canvas_ratio", self.preview_ratio_combo.currentText())))
+            self.resolution.setCurrentText(str(last.get("export_resolution", self.resolution.currentText())))
+            self.codec.setCurrentText(str(last.get("export_codec", self.codec.currentText())))
+            sizes = last.get("workspace_splitter_sizes")
+            if isinstance(sizes, dict): QTimer.singleShot(0, lambda value=sizes: self.video_editor_tab.restore_sizes(value))
 
 
     def save_settings(self):
