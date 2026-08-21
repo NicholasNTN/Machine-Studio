@@ -64,10 +64,11 @@ from editor.text_style import TextStyle
 from core.script_roles import assign_role, dual_voice_roles, voice_for_role
 from core.audio_state import AudioState, replace_narration_source
 from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes
+from core.file_dialog_history import FileDialogHistory
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS, get_style, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 from core.media_library import migrate_global_media_library
-from core.sequence_context import active_editor_source, find_origin_sequence
+from core.sequence_context import active_editor_source, find_origin_sequence, sequence_narration_path
 
 
 APP_NAME = "Machine Studio"
@@ -573,6 +574,7 @@ class MainWindow(QMainWindow):
 
         self.settings = SettingsStore(ROOT)
         self.last_used_preferences = LastUsedPreferences(self.settings.data)
+        self.file_dialog_history = FileDialogHistory(self.settings.data, self.settings.save)
         self.project = AIProject()
         self.workspace_project_path = ""
         self.queue: list[str] = []
@@ -839,7 +841,7 @@ class MainWindow(QMainWindow):
                    self.sub_preset, self.sub_font, self.sub_size, self.sub_color, self.sub_outline_color, self.sub_bold, self.sub_italic,
                    self.sub_outline, self.sub_animation, self.tts_engine, self.tts_voice, self.tts_voice_b,
                    self.tts_speed, self.narration_volume, self.blur_style, self.blur_opacity,
-                   self.preview_ratio_combo, self.resolution, self.codec)
+                   self.preview_ratio_combo, self.resolution, self.codec, self.encoder)
         for widget in widgets:
             signal = getattr(widget, "currentTextChanged", None) or getattr(widget, "currentFontChanged", None) or getattr(widget, "valueChanged", None) or getattr(widget, "textChanged", None) or getattr(widget, "toggled", None)
             if signal: signal.connect(self.remember_last_used_preferences)
@@ -853,14 +855,24 @@ class MainWindow(QMainWindow):
             subtitle_color=self.sub_color.text(), subtitle_outline_color=self.sub_outline_color.text(), subtitle_outline=self.sub_outline.value(), subtitle_animation=self.sub_animation.currentText(), subtitle_bold=self.sub_bold.isChecked(), subtitle_italic=self.sub_italic.isChecked(),
             voice_engine=self.tts_engine.currentText(), voice_a=self.tts_voice.currentText(), voice_b=self.tts_voice_b.currentText(), voice_speed=self.tts_speed.value(), voice_volume=self.narration_volume.value(),
             blur_style=self.blur_style.currentText(), blur_strength=self.blur_opacity.value(), canvas_ratio=self.preview_ratio_combo.currentText(),
-            export_resolution=self.resolution.currentText(), export_codec=self.codec.currentText(), workspace_splitter_sizes=self.video_editor_tab.sizes(),
+            export_resolution=self.resolution.currentText(), export_codec=self.codec.currentText(), export_encoder=self.encoder.currentText(), workspace_splitter_sizes=self.video_editor_tab.sizes(),
         )
         self.settings.save()
 
+    def _dialog_path(self, key, fallback=""):
+        return self.file_dialog_history.initial_path(key, fallback)
+
+    def _remember_dialog_file(self, key, path):
+        if path: self.file_dialog_history.remember_file(key, path)
+
+    def _remember_dialog_dir(self, key, path):
+        if path: self.file_dialog_history.remember_dir(key, path)
+
     def _import_media_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Import Media Folder")
+        folder = QFileDialog.getExistingDirectory(self, "Import Media Folder", self._dialog_path("last_media_dir", str(Path.home() / "Videos")))
         if not folder:
             return
+        self._remember_dialog_dir("last_media_dir", folder)
         extensions = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
         paths = [str(path) for path in Path(folder).iterdir() if path.is_file() and path.suffix.lower() in extensions]
         if paths:
@@ -868,9 +880,10 @@ class MainWindow(QMainWindow):
 
     def _choose_audio_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Add Audio", "", "Audio (*.wav *.mp3 *.m4a *.aac *.flac *.ogg)"
+            self, "Add Audio", self._dialog_path("last_music_dir"), "Audio (*.wav *.mp3 *.m4a *.aac *.flac *.ogg)"
         )
         if path:
+            self._remember_dialog_file("last_music_dir", path)
             self.music_file.setText(path)
             self._refresh_professional_panels()
             self.schedule_autosave()
@@ -1014,7 +1027,7 @@ class MainWindow(QMainWindow):
         sources = list(self.queue) or [clip.get("path", "") for clip in self.editor_clips]
         dialog = ExportDialog(
             self.live_overlay.grab(), sources,
-            self.output_dir.text().strip() or str(ROOT / "exports"),
+            self._dialog_path("last_export_dir", self.output_dir.text().strip() or str(ROOT / "exports")),
             self.resolution.currentText(), self.codec.currentText(),
             self.encoder.currentText(), self.strip_metadata.isChecked(), self,
         )
@@ -1027,6 +1040,7 @@ class MainWindow(QMainWindow):
         self._last_export_dialog = dialog
         if dialog.exec() != QDialog.Accepted: return
         self.output_dir.setText(dialog.output_dir.text().strip())
+        self._remember_dialog_dir("last_export_dir", dialog.output_dir.text().strip())
         self.resolution.setCurrentText(dialog.resolution.currentText())
         self.codec.setCurrentText(dialog.codec.currentText())
         self.encoder.setCurrentText(dialog.encoder.currentText())
@@ -2595,10 +2609,11 @@ class MainWindow(QMainWindow):
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Thêm video vào Timeline",
-            "",
+            self._dialog_path("last_media_dir", str(Path.home() / "Videos")),
             "Video (*.mp4 *.mov *.mkv *.avi *.webm)",
         )
         if paths:
+            self._remember_dialog_file("last_media_dir", paths[0])
             self.editor_add_paths(paths)
 
     def editor_add_queue_selection(self):
@@ -3407,11 +3422,12 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Thêm ảnh / sticker / logo",
-            "",
+            self._dialog_path("last_overlay_dir"),
             "Image (*.png *.jpg *.jpeg *.webp *.bmp)",
         )
         if not path:
             return
+        self._remember_dialog_file("last_overlay_dir", path)
         before = [dict(layer) for layer in self.editor_layers]
         layer = editor_engine.make_image_layer(
             path,
@@ -3432,8 +3448,9 @@ class MainWindow(QMainWindow):
         self._push_layer_undo("Add sticker", before)
 
     def editor_add_video_overlay(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Thêm Video Overlay", "", "Video (*.mp4 *.mov *.mkv *.avi *.webm)")
+        path, _ = QFileDialog.getOpenFileName(self, "Thêm Video Overlay", self._dialog_path("last_overlay_dir"), "Video (*.mp4 *.mov *.mkv *.avi *.webm)")
         if not path: return
+        self._remember_dialog_file("last_overlay_dir", path)
         before = [dict(layer) for layer in self.editor_layers]
         layer = editor_engine.make_video_overlay(path, max(0.1, editor_engine.total_duration(self.editor_clips) or self.player.duration() / 1000.0))
         self.editor_layers.append(layer); self.editor_selected_layer = len(self.editor_layers) - 1
@@ -3715,10 +3732,11 @@ class MainWindow(QMainWindow):
                 path, _ = QFileDialog.getOpenFileName(
                     self,
                     "Thay ảnh",
-                    "",
+                    self._dialog_path("last_overlay_dir"),
                     "Image (*.png *.jpg *.jpeg *.webp *.bmp)",
                 )
                 if path:
+                    self._remember_dialog_file("last_overlay_dir", path)
                     layer["path"] = str(Path(path).resolve())
             self.editor_layers[index] = layer
             self.editor_layer_selected(
@@ -4472,6 +4490,7 @@ class MainWindow(QMainWindow):
                 lambda: self.preview_ratio_combo.setCurrentText(safe_str(last.get("canvas_ratio"), self.preview_ratio_combo.currentText())),
                 lambda: self.resolution.setCurrentText(safe_str(last.get("export_resolution"), self.resolution.currentText())),
                 lambda: self.codec.setCurrentText(safe_str(last.get("export_codec"), self.codec.currentText())),
+                lambda: self.encoder.setCurrentText(safe_str(last.get("export_encoder"), self.encoder.currentText())),
             )
             for restore_preference in restorers:
                 try: restore_preference()
@@ -4782,12 +4801,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Project", "Chưa có project.")
             return
         self.capture_project_state()
-        default = str(self.project_autosave_path() or (ROOT / "project.json"))
+        default = str(Path(self._dialog_path("last_project_save_dir", str(Path.home() / "Documents"))) / "project.json")
         path, _ = QFileDialog.getSaveFileName(
             self, "Lưu Project", default, "Machine Studio Project (*.json)"
         )
         if not path:
             return
+        self._remember_dialog_file("last_project_save_dir", path)
         if not path.lower().endswith(".json"):
             path += ".json"
         self.workspace_project_path = path
@@ -4798,9 +4818,10 @@ class MainWindow(QMainWindow):
 
     def open_ai_project(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Mở Project", "", "Machine Studio Project (*.json)"
+            self, "Mở Project", self._dialog_path("last_project_open_dir", str(Path.home() / "Documents")), "Machine Studio Project (*.json)"
         )
         if path:
+            self._remember_dialog_file("last_project_open_dir", path)
             self.load_project_file(path, show_message=True)
 
     def load_project_file(self, path: str, show_message=False):
@@ -4893,9 +4914,10 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def choose_ai_video(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Chọn video", "", "Video (*.mp4 *.mov *.mkv *.avi *.webm)"
+            self, "Chọn video", self._dialog_path("last_media_dir", str(Path.home() / "Videos")), "Video (*.mp4 *.mov *.mkv *.avi *.webm)"
         )
         if path:
+            self._remember_dialog_file("last_media_dir", path)
             self.set_ai_video(path)
 
     def use_editor_timeline_for_ai(self):
@@ -5401,9 +5423,10 @@ class MainWindow(QMainWindow):
 
     def add_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Chọn video", "", "Video (*.mp4 *.mov *.mkv *.avi *.webm)"
+            self, "Chọn video", self._dialog_path("last_media_dir", str(Path.home() / "Videos")), "Video (*.mp4 *.mov *.mkv *.avi *.webm)"
         )
         if paths:
+            self._remember_dialog_file("last_media_dir", paths[0])
             self.add_paths(paths)
 
     def remove_selected_queue(self):
@@ -5496,8 +5519,9 @@ class MainWindow(QMainWindow):
         self.schedule_autosave()
 
     def choose_canvas_background_image(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Chọn ảnh nền Canvas", self.side_bg_image.text(), "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn ảnh nền Canvas", self._dialog_path("last_background_image_dir", self.side_bg_image.text()), "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
         if path:
+            self._remember_dialog_file("last_background_image_dir", path)
             self.side_bg_image.setText(path)
             self.side_bg_enabled.setChecked(True)
             self.side_bg_type.setCurrentText("Hình ảnh")
@@ -5812,9 +5836,10 @@ class MainWindow(QMainWindow):
 
     def choose_output_dir(self):
         path = QFileDialog.getExistingDirectory(
-            self, "Thư mục xuất", self.output_dir.text().strip() or str(ROOT / "exports")
+            self, "Thư mục xuất", self._dialog_path("last_export_dir", self.output_dir.text().strip() or str(ROOT / "exports"))
         )
         if path:
+            self._remember_dialog_dir("last_export_dir", path)
             self.output_dir.setText(path)
             self.settings.data["output_dir"] = path
             self.settings.save()
@@ -6102,9 +6127,10 @@ class MainWindow(QMainWindow):
 
     def choose_logo(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Chọn logo", "", "Image (*.png *.jpg *.jpeg *.webp)"
+            self, "Chọn logo", self._dialog_path("last_logo_dir"), "Image (*.png *.jpg *.jpeg *.webp)"
         )
         if path:
+            self._remember_dialog_file("last_logo_dir", path)
             self.logo_path.setText(path)
             self.logo_enabled.setChecked(True)
             self.logo_params_toggle.setChecked(True)
@@ -6708,9 +6734,10 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def choose_voice_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Chọn file giọng", "", "Audio (*.wav *.mp3 *.m4a *.aac *.flac *.ogg)"
+            self, "Chọn file giọng", self._dialog_path("last_voice_dir"), "Audio (*.wav *.mp3 *.m4a *.aac *.flac *.ogg)"
         )
         if path:
+            self._remember_dialog_file("last_voice_dir", path)
             self.voice_file.setText(path)
             self.narration_path = path
             self.project.narration_path = path
@@ -6719,9 +6746,10 @@ class MainWindow(QMainWindow):
 
     def choose_music_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Chọn nhạc nền", "", "Audio (*.wav *.mp3 *.m4a *.aac *.flac *.ogg)"
+            self, "Chọn nhạc nền", self._dialog_path("last_music_dir"), "Audio (*.wav *.mp3 *.m4a *.aac *.flac *.ogg)"
         )
         if path:
+            self._remember_dialog_file("last_music_dir", path)
             self.music_file.setText(path)
             self.refresh_live_audio_sources()
             self.schedule_processed_preview()
@@ -7497,9 +7525,10 @@ class MainWindow(QMainWindow):
 
     def choose_sub(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Chọn subtitle", "", "Subtitle (*.srt *.ass *.ssa)"
+            self, "Chọn subtitle", self._dialog_path("last_subtitle_dir"), "Subtitle (*.srt *.ass *.ssa)"
         )
         if path:
+            self._remember_dialog_file("last_subtitle_dir", path)
             # Keep imported ASS untouched; SRT can be normalized to one-line mode.
             if Path(path).suffix.lower() == ".srt":
                 self.normalize_current_srt_to_one_line(path)
@@ -8146,7 +8175,7 @@ class MainWindow(QMainWindow):
             self.editor_refresh_all()
         self.update_live_overlay_state()
 
-    def gather_export_options(self):
+    def gather_export_options(self, sequence_id=None):
         fit_mode = "Fit"
         canvas_background = self.current_canvas_background()
 
@@ -8157,9 +8186,14 @@ class MainWindow(QMainWindow):
             else:
                 source_audio_mode = "Tắt toàn bộ âm gốc"
 
-        narration = self.voice_file.text().strip()
-        if not narration and self.narration_path:
-            narration = self.narration_path
+        if sequence_id is None:
+            narration = self.voice_file.text().strip() or self.narration_path
+            narration_volume = max(0.0, min(1.5, self.narration_volume.value() / 100.0))
+        else:
+            narration = sequence_narration_path(self.sequence_manager.sequences, sequence_id)
+            sequence = find_origin_sequence(self.sequence_manager.sequences, sequence_id)
+            sequence_state = sequence.state if sequence is not None and isinstance(sequence.state, dict) else {}
+            narration_volume = max(0.0, min(1.5, safe_float(sequence_state.get("narration_volume"), 100.0) / 100.0))
 
         music_volume = 0.0 if self.mute_music.isChecked() else self.music_volume.value() / 100.0
 
@@ -8223,8 +8257,8 @@ class MainWindow(QMainWindow):
             source_audio_mode=source_audio_mode,
             source_volume=self.source_volume.value() / 100.0,
             accompaniment_path=self.accompaniment_path,
-            narration_path=narration if narration and Path(narration).exists() else "",
-            narration_volume=self.narration_volume.value() / 100.0,
+            narration_path=narration,
+            narration_volume=narration_volume,
             narration_speed=1.0,
             background_music_path=self.music_file.text().strip(),
             background_music_volume=music_volume,
@@ -8233,6 +8267,8 @@ class MainWindow(QMainWindow):
         )
 
     def export_batch(self):
+        export_sequence_id = self.sequence_manager.active_sequence_id
+        self.capture_active_sequence()
         has_editor_timeline = (
             hasattr(self, "editor_use_timeline")
             and self.editor_use_timeline.isChecked()
@@ -8263,7 +8299,15 @@ class MainWindow(QMainWindow):
                             + traceback.format_exc()
                         )
 
-            options = self.gather_export_options()
+            options = self.gather_export_options(export_sequence_id)
+            narration_check = ffm.validate_audio_file(options.narration_path) if options.narration_path else None
+            if narration_check is not None and not narration_check["valid"]:
+                QMessageBox.warning(
+                    self, "Xuất Video",
+                    "Timeline hiện tại có Voice nhưng file narration không hợp lệ.\n"
+                    "Hãy tạo lại Voice hoặc kiểm tra file audio."
+                )
+                return
             self.stop_requested = False
             self.preview_render_timer.stop()
         except Exception:
@@ -8274,8 +8318,8 @@ class MainWindow(QMainWindow):
 
         export_ffmpeg_log = ROOT / "logs" / "export_ffmpeg.log"
         export_error_log = ROOT / "logs" / "export_error.log"
-        export_sequence_id = self.sequence_manager.active_sequence_id
-        export_sequence_name = self.sequence_manager.active.name
+        export_sequence = find_origin_sequence(self.sequence_manager.sequences, export_sequence_id)
+        export_sequence_name = export_sequence.name if export_sequence is not None else ""
 
         def job(progress, log):
             outputs = []
@@ -8297,6 +8341,23 @@ class MainWindow(QMainWindow):
                     sequence_id=export_sequence_id, sequence_name=export_sequence_name,
                     output_path=output_value, exc=exc,
                 )
+
+            def verify_audio(output_value):
+                result = ffm.verify_output_audio(output_value, export_ffmpeg_log)
+                ffm.append_render_log(export_ffmpeg_log, "\n".join([
+                    "[AUDIO EXPORT]", f"sequence_id={export_sequence_id}",
+                    f"narration_expected={bool(options.narration_path)}", f"narration_path={options.narration_path}",
+                    f"narration_exists={bool(narration_check and narration_check['exists'])}",
+                    f"narration_duration={narration_check['duration'] if narration_check else 0}",
+                    f"source_audio_enabled={options.source_audio_mode != 'Tắt toàn bộ âm gốc'}",
+                    f"music_enabled={bool(options.background_music_path and options.background_music_volume > 0)}",
+                    f"output_has_audio={result['has_audio']}", f"output_audio_duration={result['duration']}",
+                    f"output_mean_volume={result['mean_volume']}", f"output_max_volume={result['max_volume']}",
+                ]))
+                if options.narration_path and not result["has_audio"]:
+                    raise RuntimeError("Xuất video hoàn tất nhưng không có audio narration.")
+                if options.narration_path and result["max_volume"] is not None and result["max_volume"] < -70:
+                    raise RuntimeError("Xuất video hoàn tất nhưng audio gần như im lặng.")
 
             def next_target(source_path):
                 stem = Path(source_path).stem
@@ -8363,6 +8424,7 @@ class MainWindow(QMainWindow):
                     if not temp_target.exists() or temp_target.stat().st_size < 1024:
                         raise RuntimeError("FFmpeg không tạo được output timeline hợp lệ.")
                     os.replace(str(temp_target), str(target))
+                    verify_audio(str(target))
                 except Exception as exc:
                     record_failure(exc, str(target)); raise
                 outputs.append(str(target))
@@ -8397,6 +8459,7 @@ class MainWindow(QMainWindow):
                     if not temp_target.exists() or temp_target.stat().st_size < 1024:
                         raise RuntimeError("FFmpeg không tạo được output hợp lệ.")
                     os.replace(str(temp_target), str(target))
+                    verify_audio(str(target))
                 except Exception as exc:
                     record_failure(exc, str(target))
                     try:
@@ -8438,9 +8501,10 @@ class MainWindow(QMainWindow):
             return
 
         default = str(Path(self.output_dir.text().strip() or ROOT / "exports") / "merged.mp4")
-        out, _ = QFileDialog.getSaveFileName(self, "Ghép Video", default, "MP4 (*.mp4)")
+        out, _ = QFileDialog.getSaveFileName(self, "Ghép Video", str(Path(self._dialog_path("last_export_dir", str(Path(default).parent))) / Path(default).name), "MP4 (*.mp4)")
         if not out:
             return
+        self._remember_dialog_file("last_export_dir", out)
         if not out.lower().endswith(".mp4"):
             out += ".mp4"
 
@@ -8721,10 +8785,11 @@ class MainWindow(QMainWindow):
 
     def choose_capcut_path(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Chọn CapCut.exe", "",
+            self, "Chọn CapCut.exe", self._dialog_path("last_application_dir"),
             "Executable (*.exe);;All files (*.*)"
         )
         if path:
+            self._remember_dialog_file("last_application_dir", path)
             self.capcut_path.setText(path)
 
     def open_capcut(self):
@@ -8745,9 +8810,10 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def choose_download_dir(self):
         path = QFileDialog.getExistingDirectory(
-            self, "Thư mục tải", self.dl_dir.text().strip() or str(ROOT / "downloads")
+            self, "Thư mục tải", self._dialog_path("last_download_dir", self.dl_dir.text().strip() or str(ROOT / "downloads"))
         )
         if path:
+            self._remember_dialog_dir("last_download_dir", path)
             self.dl_dir.setText(path)
 
     def preview_download_url(self):
@@ -8790,10 +8856,11 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn cookies.txt",
-            self.cookies_file.text().strip() or "",
+            self._dialog_path("last_download_dir", self.cookies_file.text().strip() or ""),
             "Netscape cookies (*.txt);;All files (*.*)",
         )
         if path:
+            self._remember_dialog_file("last_download_dir", path)
             self.cookies_file.setText(path)
             self.cookies_browser.setCurrentText("cookies.txt")
             self.status("Đã chọn cookies.txt cho Downloader.")

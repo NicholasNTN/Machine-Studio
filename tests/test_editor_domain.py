@@ -2,6 +2,7 @@ import unittest
 import tempfile
 import json
 import sys
+from unittest.mock import patch
 from pathlib import Path
 
 from core.subtitle_sizing import ass_font_size, canonical_font_size, preview_font_pixels
@@ -21,6 +22,8 @@ from core import editor_engine, subtitle_engine, ffmpeg_engine
 from core.script_roles import assign_role, voice_for_role
 from core.media_library import migrate_global_media_library
 from core.sequence_context import active_editor_source, find_origin_sequence
+from core.sequence_context import sequence_narration_path
+from core.file_dialog_history import FileDialogHistory
 from editor.text_style import TextStyle
 from editor.blur_zone import normalize_blur_zones
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -32,6 +35,43 @@ from core.models import AIProject
 
 
 class EditorDomainTests(unittest.TestCase):
+    def test_active_sequence_narration_never_falls_back_to_other_timeline(self):
+        manager = SequenceManager(); first = manager.active
+        first.state["narration_path"] = "voice-a.wav"
+        second = manager.create(); second.state["narration_path"] = "voice-b.wav"
+        self.assertEqual(sequence_narration_path(manager.sequences, first.id), "voice-a.wav")
+        self.assertEqual(sequence_narration_path(manager.sequences, second.id), "voice-b.wav")
+        first.state["narration_path"] = ""
+        self.assertEqual(sequence_narration_path(manager.sequences, first.id), "")
+
+    def test_narration_only_and_mixed_audio_plans_are_explicit(self):
+        label, expression = ffmpeg_engine.audio_mix_filter(["anar"])
+        self.assertEqual(label, "anar"); self.assertIsNone(expression)
+        label, expression = ffmpeg_engine.audio_mix_filter(["abase", "anar"])
+        self.assertEqual(label, "aout"); self.assertIn("normalize=0", expression)
+        filters = ffmpeg_engine.normalized_audio_filters(1.0)
+        self.assertTrue(any("channel_layouts=stereo" in value for value in filters))
+
+    def test_invalid_narration_and_output_audio_verification(self):
+        with tempfile.TemporaryDirectory() as folder:
+            empty = Path(folder) / "empty.wav"; empty.touch()
+            self.assertFalse(ffmpeg_engine.validate_audio_file(empty)["valid"])
+        with patch.object(ffmpeg_engine, "probe", return_value={"has_audio": False, "duration": 5.0}):
+            self.assertFalse(ffmpeg_engine.verify_output_audio("out.mp4")["has_audio"])
+
+    def test_file_dialog_history_is_local_and_handles_missing_paths(self):
+        settings = {}; saved = []
+        with tempfile.TemporaryDirectory() as folder:
+            media = Path(folder) / "media"; media.mkdir(); video = media / "a.mp4"; video.touch()
+            history = FileDialogHistory(settings, lambda: saved.append(True))
+            history.remember_file("last_media_dir", video)
+            self.assertEqual(history.initial_path("last_media_dir"), str(media))
+            missing = media / "gone" / "file.mp4"
+            history.values["last_project_open_dir"] = str(missing)
+            self.assertEqual(history.initial_path("last_project_open_dir"), str(media))
+        self.assertIn("file_dialog_history", settings); self.assertTrue(saved)
+        self.assertNotIn("narration_path", settings["file_dialog_history"])
+
     def test_run_persists_full_combined_process_diagnostics(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "logs" / "export_ffmpeg.log"
