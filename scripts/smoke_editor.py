@@ -15,6 +15,7 @@ from PySide6.QtGui import QPixmap
 from app import MainWindow
 from core.ai_styles import AI_STYLES, VOICE_MODE_LABELS
 from ui.export_dialog import ExportDialog
+from ui.media_panel import MediaCard
 
 
 def main() -> int:
@@ -49,6 +50,20 @@ def main() -> int:
     assert window.video_editor_tab.set_tool("text")
     assert window.settings_panel.current_page() == "text"
     assert window.narration_player.audioOutput() is window.narration_output
+    assert len(window.sequence_manager.sequences) == 1
+    first_id = window.sequence_manager.active.id
+    window.create_clean_sequence()
+    assert len(window.sequence_manager.sequences) == 2
+    assert window.sequence_manager.active.id != first_id
+    assert window.editor_clips == [] and window.preview_loaded_path == ""
+    window.rename_active_sequence("Timeline Smoke")
+    duplicate = window.duplicate_sequence()
+    assert duplicate.name.endswith("Copy")
+    window.sequence_manager.close(duplicate.id); window.refresh_sequence_tabs(); window.restore_active_sequence()
+    assert len(window._sequence_undo_stacks) >= 2
+    card = MediaCard(str(ROOT / "missing-smoke.mp4"))
+    assert card.addRequested is not None and card.removeRequested is not None
+    assert "workspace_splitter_sizes" in window.last_used_preferences.values or window.video_editor_tab.sizes()
     assert window.editor_layer_key_mode.findText("Chroma Key") >= 0
     QTimer.singleShot(250, window.close)
     QTimer.singleShot(350, application.quit)

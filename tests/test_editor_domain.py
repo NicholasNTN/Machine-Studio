@@ -12,6 +12,7 @@ from editor.blur_zone import BlurZone, source_zone_canvas_rect, resize_normalize
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core.audio_state import AudioState, replace_narration_source, audio_source_is_loadable
+from core.last_used_preferences import LastUsedPreferences
 from core import subtitle_engine
 from core.script_roles import assign_role, voice_for_role
 from editor.layer_order import CANONICAL_LAYER_ORDER
@@ -181,6 +182,19 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(restored.active.state["subtitle"], "B")
         restored.close(duplicate.id)
         self.assertEqual(restored.active.name, "Machines")
+
+    def test_last_used_preferences_never_copy_timeline_content(self):
+        settings = {}; prefs = LastUsedPreferences(settings)
+        prefs.update(text_font="Oswald", text_color="#FFFF00", subtitle_editor_text="Hello", narration_path="voice.wav", blur_zones=[{"x": .1}])
+        self.assertEqual(prefs.text_defaults(), {"font": "Oswald", "color": "#FFFF00"})
+        self.assertNotIn("narration_path", settings["last_used_preferences"])
+
+    def test_sequence_voice_subtitle_and_blur_state_isolation(self):
+        manager = SequenceManager(); first = manager.active
+        first.state.update({"narration_path": "voice-a.wav", "preview_cues": [(0, 1, "A")], "blur_zones": [{"id": "a"}]})
+        second = manager.create(); second.state.update({"narration_path": "voice-b.wav", "preview_cues": [(0, 1, "B")], "blur_zones": [{"id": "b"}]})
+        manager.activate(first.id); self.assertEqual(manager.active.state["narration_path"], "voice-a.wav")
+        manager.activate(second.id); self.assertEqual(manager.active.state["blur_zones"][0]["id"], "b")
 
 
 if __name__ == "__main__":
