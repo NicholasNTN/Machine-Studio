@@ -8,6 +8,7 @@ import os
 import math
 import tempfile
 import re
+import datetime
 
 from .models import Scene, ExportOptions
 from . import subtitle_engine
@@ -39,32 +40,64 @@ def _flags():
     return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
-def run(cmd: list[str], log=None, process_holder=None, low_priority: bool = False):
+def _command_text(cmd) -> str:
+    return " ".join(f'"{x}"' if any(ch.isspace() for ch in str(x)) else str(x) for x in cmd)
+
+
+def append_render_log(log_file, text: str):
+    if not log_file:
+        return
+    path = Path(log_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", errors="replace") as handle:
+        handle.write(str(text))
+        if not str(text).endswith("\n"):
+            handle.write("\n")
+        handle.flush()
+
+
+def begin_export_log(log_file, *, sequence_id="", sequence_name="", input_path="", output_path=""):
+    append_render_log(log_file, "\n" + "=" * 50)
+    append_render_log(log_file, "EXPORT START")
+    append_render_log(log_file, f"timestamp={datetime.datetime.now().astimezone().isoformat()}")
+    append_render_log(log_file, f"sequence_id={sequence_id}")
+    append_render_log(log_file, f"sequence_name={sequence_name}")
+    append_render_log(log_file, f"input={input_path}")
+    append_render_log(log_file, f"output={output_path}")
+    append_render_log(log_file, "=" * 50)
+
+
+def run(cmd: list[str], log=None, process_holder=None, low_priority: bool = False, log_file=None):
+    command = _command_text(cmd)
     if log:
-        log(" ".join(f'"{x}"' if " " in str(x) else str(x) for x in cmd))
-    p = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=(
-            _flags()
-            | (getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0) if low_priority and os.name == "nt" else 0)
-        ),
-    )
-    if process_holder is not None:
-        process_holder["process"] = p
-    lines = []
-    assert p.stdout is not None
-    for line in p.stdout:
-        lines.append(line)
-        if log:
-            log(line.rstrip())
-    rc = p.wait()
-    if process_holder is not None:
-        process_holder["process"] = None
+        log(command)
+    log_handle = None
+    p = None
+    try:
+        if log_file:
+            path = Path(log_file); path.parent.mkdir(parents=True, exist_ok=True)
+            log_handle = path.open("a", encoding="utf-8", errors="replace")
+            log_handle.write(f"FULL FFMPEG COMMAND\n{command}\n"); log_handle.flush()
+        p = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace",
+            creationflags=(_flags() | (getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0) if low_priority and os.name == "nt" else 0)),
+        )
+        if process_holder is not None: process_holder["process"] = p
+        lines = []
+        assert p.stdout is not None
+        for line in p.stdout:
+            lines.append(line)
+            if log: log(line.rstrip())
+            if log_handle:
+                log_handle.write(line); log_handle.flush()
+        rc = p.wait()
+        if log_handle:
+            log_handle.write(f"return_code={rc}\n{'EXPORT FAILED' if rc != 0 else 'EXPORT SUCCESS'}\n"); log_handle.flush()
+    finally:
+        if p is not None and p.stdout is not None: p.stdout.close()
+        if process_holder is not None: process_holder["process"] = None
+        if log_handle: log_handle.close()
     if rc != 0:
         raise FFmpegError("\n".join(lines[-60:]))
     return "\n".join(lines)
@@ -420,6 +453,8 @@ def export_video(
     log=None,
     process_holder=None,
     fast_preview: bool = False,
+    log_file=None,
+    stage: str = "final render",
 ):
     ffmpeg = find_binary("ffmpeg")
     info = probe(input_path)
@@ -848,7 +883,9 @@ def export_video(
     cmd += ["-sn", "-dn", "-movflags", "+faststart", "-shortest", output_path]
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     try:
-        run(cmd, log=log, process_holder=process_holder, low_priority=fast_preview)
+        if log_file:
+            append_render_log(log_file, f"\n[STAGE]\n{stage}")
+        run(cmd, log=log, process_holder=process_holder, low_priority=fast_preview, log_file=log_file)
     finally:
         if temp_ass and Path(temp_ass).exists():
             try:

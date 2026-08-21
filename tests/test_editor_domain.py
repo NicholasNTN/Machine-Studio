@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 import json
+import sys
 from pathlib import Path
 
 from core.subtitle_sizing import ass_font_size, canonical_font_size, preview_font_pixels
@@ -16,7 +17,7 @@ from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
 from core.audio_state import AudioState, replace_narration_source, audio_source_is_loadable
 from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float, safe_bool, safe_str, safe_splitter_sizes, sanitize_workspace_splitter_sizes
-from core import editor_engine, subtitle_engine
+from core import editor_engine, subtitle_engine, ffmpeg_engine
 from core.script_roles import assign_role, voice_for_role
 from core.media_library import migrate_global_media_library
 from core.sequence_context import active_editor_source, find_origin_sequence
@@ -31,6 +32,25 @@ from core.models import AIProject
 
 
 class EditorDomainTests(unittest.TestCase):
+    def test_run_persists_full_combined_process_diagnostics(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "logs" / "export_ffmpeg.log"
+            output = ffmpeg_engine.run(
+                [sys.executable, "-c", "import sys; print('stdout-line'); print('stderr-line', file=sys.stderr)"],
+                log_file=path,
+            )
+            with self.assertRaises(ffmpeg_engine.FFmpegError):
+                ffmpeg_engine.run(
+                    [sys.executable, "-c", "import sys; print('fatal-detail', file=sys.stderr); sys.exit(3)"],
+                    log_file=path,
+                )
+            saved = path.read_text(encoding="utf-8")
+        self.assertIn("stdout-line", output); self.assertIn("stderr-line", output)
+        self.assertIn("FULL FFMPEG COMMAND", saved); self.assertIn("return_code=0", saved)
+        self.assertIn("EXPORT SUCCESS", saved)
+        self.assertIn("fatal-detail", saved); self.assertIn("return_code=3", saved)
+        self.assertIn("EXPORT FAILED", saved)
+
     def test_canvas_fit_geometry_stays_inside_canvas(self):
         cases = ((1080, 1920, 1920, 1080), (1920, 1080, 1080, 1920), (1080, 1350, 1080, 1920), (1080, 1080, 1920, 1080))
         for sw, sh, cw, ch in cases:

@@ -4576,7 +4576,7 @@ class MainWindow(QMainWindow):
             self.sequence_manager.activate(current_id); self.restore_active_sequence(); self.refresh_sequence_tabs()
         self.status(f"Đã hoàn tất tác vụ cho {origin_name}")
 
-    def run_worker(self, title, fn, done, sequence_id=None):
+    def run_worker(self, title, fn, done, sequence_id=None, error_handler=None):
         if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "Đang chạy", "Hãy chờ tác vụ hiện tại hoàn tất.")
             return
@@ -4589,7 +4589,7 @@ class MainWindow(QMainWindow):
         self._retain_worker(worker)
         worker.progress.connect(self.worker_progress)
         worker.log.connect(self.route_log)
-        worker.error.connect(self.worker_error)
+        worker.error.connect(error_handler or self.worker_error)
 
         def result_ready(result):
             # Never destroy/clear the QThread here. This signal is emitted from
@@ -4651,6 +4651,42 @@ class MainWindow(QMainWindow):
                     seen.add(line)
             message = "\n".join(compact[-16:])
         QMessageBox.critical(self, "Lỗi", message)
+
+    def _export_worker_error(self, tb):
+        self.progress.setRange(0, 100); self.progress.setValue(0); self.progress.hide(); self.status("Error")
+        error_path = ROOT / "logs" / "export_error.log"
+        ffmpeg_path = ROOT / "logs" / "export_ffmpeg.log"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Critical); box.setWindowTitle("Xuất Video")
+        box.setText("Xuất video thất bại.")
+        box.setInformativeText(
+            "Chi tiết đã được lưu tại:\n\n"
+            "logs/export_error.log\nlogs/export_ffmpeg.log"
+        )
+        open_button = box.addButton("Open Log Folder", QMessageBox.ActionRole)
+        copy_button = box.addButton("Copy Error", QMessageBox.ActionRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_button:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(error_path.parent.resolve())))
+        elif box.clickedButton() is copy_button:
+            try: QApplication.clipboard().setText(error_path.read_text(encoding="utf-8", errors="replace"))
+            except OSError: QApplication.clipboard().setText(str(tb))
+
+    @staticmethod
+    def _write_export_error(error_path, ffmpeg_path, *, sequence_id, sequence_name, output_path, exc):
+        try:
+            lines = ffmpeg_path.read_text(encoding="utf-8", errors="replace").splitlines()[-150:] if ffmpeg_path.exists() else []
+            text = "\n".join([
+                f"timestamp={datetime.datetime.now().astimezone().isoformat()}",
+                f"sequence_id={sequence_id}", f"sequence_name={sequence_name}",
+                f"output={output_path}", f"exception_type={type(exc).__name__}",
+                "", "FULL EXCEPTION", traceback.format_exc(), "", "LAST 150 FFMPEG LINES", *lines,
+            ])
+            error_path.parent.mkdir(parents=True, exist_ok=True)
+            error_path.write_text(text, encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
     def route_log(self, text):
         text = str(text)
@@ -8236,8 +8272,31 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Xuất Video", "Không thể chuẩn bị xuất video. Ứng dụng vẫn tiếp tục chạy.\n\n" + tb[-1800:])
             return
 
+        export_ffmpeg_log = ROOT / "logs" / "export_ffmpeg.log"
+        export_error_log = ROOT / "logs" / "export_error.log"
+        export_sequence_id = self.sequence_manager.active_sequence_id
+        export_sequence_name = self.sequence_manager.active.name
+
         def job(progress, log):
             outputs = []
+
+            def begin_attempt(input_value, output_value):
+                ffm.begin_export_log(
+                    export_ffmpeg_log, sequence_id=export_sequence_id,
+                    sequence_name=export_sequence_name, input_path=input_value,
+                    output_path=output_value,
+                )
+
+            def record_failure(exc, output_value):
+                ffm.append_render_log(
+                    export_ffmpeg_log,
+                    f"EXPORT FAILED\nexception_type={type(exc).__name__}",
+                )
+                self._write_export_error(
+                    export_error_log, export_ffmpeg_log,
+                    sequence_id=export_sequence_id, sequence_name=export_sequence_name,
+                    output_path=output_value, exc=exc,
+                )
 
             def next_target(source_path):
                 stem = Path(source_path).stem
@@ -8272,6 +8331,7 @@ class MainWindow(QMainWindow):
                     or self.editor_clips[0]["path"]
                 )
                 timeline_source = workspace / "editor_timeline_source.mp4"
+                begin_attempt(" | ".join(str(clip.get("path", "")) for clip in self.editor_clips), str(target))
 
                 target_size = ffm.parse_resolution(
                     options.resolution
@@ -8285,35 +8345,26 @@ class MainWindow(QMainWindow):
                     f"duration={editor_engine.total_duration(self.editor_clips):.2f}s"
                 )
 
-                editor_engine.render_timeline(
-                    self.editor_clips,
-                    str(timeline_source),
-                    target_width=tw,
-                    target_height=th,
-                    preview=False,
-                    log=log,
-                    process_holder=self.process_holder,
-                )
-                progress(1, 2)
-
-                # Per-clip transforms were already baked by render_timeline.
-                options.video_transform = VideoTransform().to_dict()
-
-                ffm.export_video(
-                    str(timeline_source),
-                    str(temp_target),
-                    options,
-                    log=log,
-                    process_holder=self.process_holder,
-                )
-                if (
-                    not temp_target.exists()
-                    or temp_target.stat().st_size < 1024
-                ):
-                    raise RuntimeError(
-                        "FFmpeg không tạo được output timeline hợp lệ."
+                try:
+                    editor_engine.render_timeline(
+                        self.editor_clips, str(timeline_source), target_width=tw,
+                        target_height=th, preview=False, log=log,
+                        process_holder=self.process_holder, log_file=export_ffmpeg_log,
+                        stage="timeline render",
                     )
-                os.replace(str(temp_target), str(target))
+                    progress(1, 2)
+                    # Per-clip transforms were already baked by render_timeline.
+                    options.video_transform = VideoTransform().to_dict()
+                    ffm.export_video(
+                        str(timeline_source), str(temp_target), options, log=log,
+                        process_holder=self.process_holder, log_file=export_ffmpeg_log,
+                        stage="effects, subtitles, audio mix and final mux",
+                    )
+                    if not temp_target.exists() or temp_target.stat().st_size < 1024:
+                        raise RuntimeError("FFmpeg không tạo được output timeline hợp lệ.")
+                    os.replace(str(temp_target), str(target))
+                except Exception as exc:
+                    record_failure(exc, str(target)); raise
                 outputs.append(str(target))
                 progress(2, 2)
                 return outputs
@@ -8331,6 +8382,7 @@ class MainWindow(QMainWindow):
 
                 log(f"===== [{i+1}/{len(self.queue)}] {Path(source).name} =====")
                 log(f"[OUTPUT] {target}")
+                begin_attempt(source, str(target))
 
                 try:
                     ffm.export_video(
@@ -8339,11 +8391,14 @@ class MainWindow(QMainWindow):
                         options,
                         log=log,
                         process_holder=self.process_holder,
+                        log_file=export_ffmpeg_log,
+                        stage="effects, subtitles, audio mix and final mux",
                     )
                     if not temp_target.exists() or temp_target.stat().st_size < 1024:
                         raise RuntimeError("FFmpeg không tạo được output hợp lệ.")
                     os.replace(str(temp_target), str(target))
-                except Exception:
+                except Exception as exc:
+                    record_failure(exc, str(target))
                     try:
                         temp_target.unlink(missing_ok=True)
                     except Exception:
@@ -8363,7 +8418,7 @@ class MainWindow(QMainWindow):
                 f"Đã xuất {len(outputs)} video vào:\n{out_dir}"
             )
 
-        self.run_worker("Đang xuất video...", job, done)
+        self.run_worker("Đang xuất video...", job, done, error_handler=self._export_worker_error)
 
     def stop_current(self):
         self.stop_requested = True

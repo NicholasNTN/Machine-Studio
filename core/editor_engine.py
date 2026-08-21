@@ -184,6 +184,8 @@ def render_timeline(
     preview: bool = False,
     log=None,
     process_holder=None,
+    log_file=None,
+    stage: str = "timeline render",
 ) -> str:
     """Render trimmed/reordered clips into one normalized H.264/AAC timeline."""
     active = [normalize_clip(c) for c in clips if c.get("enabled", True) and clip_duration(c) >= 0.05]
@@ -291,11 +293,14 @@ def render_timeline(
             f"{out_w}x{out_h} | duration={total_duration(active):.2f}s"
         )
 
+    if log_file:
+        ffm.append_render_log(log_file, f"\n[STAGE]\n{stage}")
     ffm.run(
         cmd,
         log=log,
         process_holder=process_holder,
         low_priority=preview,
+        log_file=log_file,
     )
 
     target = Path(output_path)
