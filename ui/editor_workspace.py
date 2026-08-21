@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QS
 class EditorWorkspace(QWidget):
     splitterSizesChanged = Signal()
     toolSelected = Signal(str)
-    TOOLS = (("media", "▣", "Media"), ("voice", "♫", "Voice"), ("subtitle", "CC", "Phụ đề"), ("blur", "◉", "Blur"), ("customize", "◆", "Tùy chỉnh"), ("advanced", "⚙", "Nâng cao"))
+    TOOLS = (("media", "▣", "Media"), ("voice", "♫", "Voice"), ("subtitle", "CC", "Phụ đề"), ("text", "T", "Text"), ("blur", "◉", "Blur"), ("customize", "◆", "Tùy chỉnh"), ("advanced", "⚙", "Nâng cao"))
 
     def __init__(self, pages, preview, inspector, timeline, parent=None):
         super().__init__(parent); root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0)

@@ -724,6 +724,7 @@ class MainWindow(QMainWindow):
         self.media_panel = MediaPanel()
         self.voice_tool_panel = ActionListPanel("Voice", (), "Use the complete Voice settings on the right.")
         self.subtitle_tool_panel = ActionListPanel("Phụ đề", (), "Use Subtitle & Translation settings on the right.")
+        self.text_tool_panel = ActionListPanel("Text", (), "Manual text layers are independent from subtitles.")
         self.blur_tool_panel = ActionListPanel("Blur", (), "Use complete Blur Zones settings on the right.")
         self.customize_tool_panel = ActionListPanel("Tùy chỉnh", (), "Logo, watermark, and playback speed settings.")
         self.advanced_tool_panel = ActionListPanel("Nâng cao", (), "Side background and overlay text settings.")
@@ -741,9 +742,15 @@ class MainWindow(QMainWindow):
         move_up = QPushButton("Layer Up"); move_up.clicked.connect(lambda: self.editor_move_selected_layer(-1))
         move_down = QPushButton("Layer Down"); move_down.clicked.connect(lambda: self.editor_move_selected_layer(1))
         for button in (add_overlay, add_sticker, move_up, move_down, delete_layer): composition_actions.addWidget(button)
-        composition_layout.addLayout(composition_actions); composition_layout.addWidget(self.editor_layer_list); composition_layout.addWidget(self.editor_layer_props_panel)
-        self.editor_layer_props_panel.setVisible(True)
+        composition_layout.addLayout(composition_actions); composition_layout.addWidget(self.editor_layer_list)
         self.advanced_settings_box.layout().insertWidget(1, composition)
+
+        text_page = QWidget(); text_layout = QVBoxLayout(text_page); text_layout.setContentsMargins(0, 0, 0, 0)
+        add_text = QPushButton("+ Add Text"); add_text.clicked.connect(self.editor_add_text_layer)
+        text_hint = QLabel("Manual Text có nội dung, font, màu, vị trí, kích thước, xoay, độ mờ và thời gian riêng; không thay đổi phụ đề.")
+        text_hint.setObjectName("hint"); text_hint.setWordWrap(True)
+        text_layout.addWidget(add_text); text_layout.addWidget(text_hint); text_layout.addWidget(self.editor_layer_props_panel)
+        self.editor_layer_props_panel.setVisible(True)
 
         voice_page = QWidget(); voice_layout = QVBoxLayout(voice_page); voice_layout.setContentsMargins(0, 0, 0, 0); voice_layout.addWidget(self.voice_settings_box); voice_layout.addWidget(self.voice_audio_strip)
         media_settings = QLabel("Select a video clip for working clip settings. Media import and search stay on the left."); media_settings.setWordWrap(True); media_settings.setObjectName("hint")
@@ -751,6 +758,7 @@ class MainWindow(QMainWindow):
             "media": media_settings,
             "voice": voice_page,
             "subtitle": self.subtitle_settings_box,
+            "text": text_page,
             "blur": self.blur_settings_box,
             "customize": self.customize_settings_box,
             "advanced": self.advanced_settings_box,
@@ -769,6 +777,7 @@ class MainWindow(QMainWindow):
             "media": self.media_panel,
             "voice": self.voice_tool_panel,
             "subtitle": self.subtitle_tool_panel,
+            "text": self.text_tool_panel,
             "blur": self.blur_tool_panel,
             "customize": self.customize_tool_panel,
             "advanced": self.advanced_tool_panel,
@@ -3130,6 +3139,8 @@ class MainWindow(QMainWindow):
         )
         self.editor_layers.append(layer)
         self.editor_selected_layer = len(self.editor_layers) - 1
+        if hasattr(self, "settings_panel"):
+            self.settings_panel.set_page("text")
         self.editor_refresh_layer_list()
         self.editor_select_extra_layer_in_list(
             self.editor_selected_layer
@@ -5838,6 +5849,8 @@ class MainWindow(QMainWindow):
         elif kind == "editor_layer" and 0 <= index < len(self.editor_layers):
             layer = self.editor_layers[index]
             selection_kind = "image" if layer.get("type") == "image" else "text"
+            if selection_kind == "text":
+                self.settings_panel.set_page("text")
             self.editor_document.selection.select(selection_kind, str(layer.get("id", "")), str(layer.get("group_id", "")))
             self.editor_timeline.set_selected_item(str(layer.get("id", "")))
             self.context_inspector.load_properties(selection_kind, layer)
