@@ -247,6 +247,12 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(restored.active_sequence_id, manager.active_sequence_id)
         self.assertEqual([item["name"] for item in restored.sequences], ["Timeline 1", "Timeline 2"])
 
+    def test_sequence_tab_refresh_uses_supported_qtabbar_api(self):
+        source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
+        self.assertNotIn("sequence_tabs.clear()", source)
+        self.assertIn("sequence_tabs.removeTab", source)
+        self.assertIn("self.sequence_tabs.blockSignals(signals_were_blocked)", source)
+
 
 if __name__ == "__main__":
     unittest.main()

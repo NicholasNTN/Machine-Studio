@@ -2131,15 +2131,31 @@ class MainWindow(QMainWindow):
         finally:
             self._restoring_state = False; self._switching_sequence = False
 
+    def _clear_sequence_tabs(self):
+        """QTabBar has removeTab(), but unlike QTabWidget it has no clear()."""
+        while self.sequence_tabs.count() > 0:
+            self.sequence_tabs.removeTab(self.sequence_tabs.count() - 1)
+
     def refresh_sequence_tabs(self):
-        if not hasattr(self, "sequence_tabs"): return
-        self.sequence_tabs.blockSignals(True); self.sequence_tabs.clear()
-        active_index = 0
-        for index, sequence in enumerate(self.sequence_manager.sequences):
-            self.sequence_tabs.addTab(sequence.name); self.sequence_tabs.setTabData(index, sequence.id)
-            if sequence.id == self.sequence_manager.active_sequence_id: active_index = index
-        plus = self.sequence_tabs.addTab("+"); self.sequence_tabs.setTabData(plus, "__new__")
-        self.sequence_tabs.setTabButton(plus, QTabBar.RightSide, None); self.sequence_tabs.setCurrentIndex(active_index); self.sequence_tabs.blockSignals(False)
+        if not hasattr(self, "sequence_tabs"):
+            return
+        signals_were_blocked = self.sequence_tabs.blockSignals(True)
+        try:
+            self._clear_sequence_tabs()
+            active_index = 0
+            for sequence in self.sequence_manager.sequences:
+                tab_index = self.sequence_tabs.addTab(sequence.name)
+                self.sequence_tabs.setTabData(tab_index, sequence.id)
+                if sequence.id == self.sequence_manager.active_sequence_id:
+                    active_index = tab_index
+            plus_index = self.sequence_tabs.addTab("+")
+            self.sequence_tabs.setTabData(plus_index, "__new__")
+            # Styles may place close buttons on either side; the pseudo-tab has neither.
+            self.sequence_tabs.setTabButton(plus_index, QTabBar.LeftSide, None)
+            self.sequence_tabs.setTabButton(plus_index, QTabBar.RightSide, None)
+            self.sequence_tabs.setCurrentIndex(active_index)
+        finally:
+            self.sequence_tabs.blockSignals(signals_were_blocked)
 
     def _sequence_tab_changed(self, index):
         if self._switching_sequence or index < 0: return
