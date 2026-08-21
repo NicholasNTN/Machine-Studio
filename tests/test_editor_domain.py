@@ -7,9 +7,25 @@ from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
 from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle
+from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
 
 
 class EditorDomainTests(unittest.TestCase):
+    def test_canvas_fit_geometry_stays_inside_canvas(self):
+        cases = ((1080, 1920, 1920, 1080), (1920, 1080, 1080, 1920), (1080, 1350, 1080, 1920), (1080, 1080, 1920, 1080))
+        for sw, sh, cw, ch in cases:
+            rect = calculate_fit_rect(sw, sh, cw, ch)
+            self.assertGreaterEqual(rect.x, -1e-7); self.assertGreaterEqual(rect.y, -1e-7)
+            self.assertLessEqual(rect.x + rect.width, cw + 1e-7); self.assertLessEqual(rect.y + rect.height, ch + 1e-7)
+
+    def test_canvas_fill_geometry_intentionally_overflows(self):
+        rect = calculate_fill_rect(1080, 1920, 1920, 1080)
+        self.assertTrue(rect.width > 1920 or rect.height > 1080)
+
+    def test_canvas_background_round_trip(self):
+        state = CanvasBackground(mode="image", image_path="background.png", image_fit="cover", opacity=82)
+        self.assertEqual(CanvasBackground.from_dict(state.to_dict()), state)
+
     def test_non_video_content_extends_trimmed_video_duration(self):
         state = TimelineState(clips=[{"source_start": 10.0, "source_end": 61.523, "enabled": True}])
         track = state.track_for_kind(TimelineItemKind.AUDIO)

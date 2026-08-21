@@ -1178,19 +1178,35 @@ class MainWindow(QMainWindow):
         ag.addWidget(self.logo_params_toggle, 5, 0, 1, 2)
         ag.addWidget(self.logo_params_panel, 6, 0, 1, 2)
 
-        # "CÀI ĐẶT NÂNG CAO" chỉ còn NỀN 2 BÊN + CHỮ PHỦ.
+        # Advanced canvas composition and overlay text.
         extra = QGroupBox("Cài Đặt Nâng Cao")
         self.advanced_settings_box = extra
         xg = QVBoxLayout(extra)
 
-        side = QGroupBox("Nền 2 bên")
+        side = QGroupBox("Nền khung")
         sg = QGridLayout(side)
         self.side_bg_enabled = QCheckBox("Bật")
         self.side_bg_type = QComboBox()
-        self.side_bg_type.addItems(["Mờ video", "Đen"])
+        self.side_bg_type.addItems(["Không", "Mờ video", "Màu đơn", "Hình ảnh"])
+        self.side_bg_color = QLineEdit("#000000")
+        choose_bg_color = QPushButton("Màu")
+        choose_bg_color.clicked.connect(lambda: self.pick_color(self.side_bg_color))
+        self.side_bg_image = QLineEdit(); self.side_bg_image.setPlaceholderText("Ảnh nền Canvas...")
+        choose_bg_image = QPushButton("Chọn ảnh")
+        choose_bg_image.clicked.connect(self.choose_canvas_background_image)
+        self.side_bg_image_fit = QComboBox(); self.side_bg_image_fit.addItems(["Cover", "Contain", "Stretch"])
+        self.side_bg_opacity = QSpinBox(); self.side_bg_opacity.setRange(0, 100); self.side_bg_opacity.setValue(100); self.side_bg_opacity.setSuffix(" %")
+        self.side_bg_blur = QSpinBox(); self.side_bg_blur.setRange(1, 80); self.side_bg_blur.setValue(24)
+        self.side_bg_brightness = QSpinBox(); self.side_bg_brightness.setRange(-100, 100); self.side_bg_brightness.setValue(-15); self.side_bg_brightness.setSuffix(" %")
         sg.addWidget(self.side_bg_enabled, 0, 0)
         sg.addWidget(QLabel("Kiểu"), 1, 0)
         sg.addWidget(self.side_bg_type, 1, 1)
+        sg.addWidget(self.side_bg_color, 2, 0); sg.addWidget(choose_bg_color, 2, 1)
+        sg.addWidget(self.side_bg_image, 3, 0); sg.addWidget(choose_bg_image, 3, 1)
+        sg.addWidget(QLabel("Ảnh phủ Canvas"), 4, 0); sg.addWidget(self.side_bg_image_fit, 4, 1)
+        sg.addWidget(QLabel("Độ trong"), 5, 0); sg.addWidget(self.side_bg_opacity, 5, 1)
+        sg.addWidget(QLabel("Độ mờ"), 6, 0); sg.addWidget(self.side_bg_blur, 6, 1)
+        sg.addWidget(QLabel("Sáng / tối"), 7, 0); sg.addWidget(self.side_bg_brightness, 7, 1)
         xg.addWidget(side)
 
         overlay = QGroupBox("Chữ phủ")
@@ -1872,6 +1888,14 @@ class MainWindow(QMainWindow):
             (self.logo_y, "valueChanged"),
             (self.logo_scale, "valueChanged"),
             (self.logo_opacity, "valueChanged"),
+            (self.side_bg_enabled, "toggled"),
+            (self.side_bg_type, "currentTextChanged"),
+            (self.side_bg_color, "textChanged"),
+            (self.side_bg_image, "textChanged"),
+            (self.side_bg_image_fit, "currentTextChanged"),
+            (self.side_bg_opacity, "valueChanged"),
+            (self.side_bg_blur, "valueChanged"),
+            (self.side_bg_brightness, "valueChanged"),
             (self.overlay_enabled, "toggled"),
             (self.overlay_text, "textChanged"),
             (self.overlay_x, "valueChanged"),
@@ -1918,6 +1942,12 @@ class MainWindow(QMainWindow):
             (self.logo_remove_bg, "toggled"),
             (self.side_bg_enabled, "toggled"),
             (self.side_bg_type, "currentTextChanged"),
+            (self.side_bg_color, "textChanged"),
+            (self.side_bg_image, "textChanged"),
+            (self.side_bg_image_fit, "currentTextChanged"),
+            (self.side_bg_opacity, "valueChanged"),
+            (self.side_bg_blur, "valueChanged"),
+            (self.side_bg_brightness, "valueChanged"),
             (self.overlay_enabled, "toggled"),
             (self.overlay_text, "textChanged"),
             (self.overlay_x, "valueChanged"),
@@ -4782,6 +4812,24 @@ class MainWindow(QMainWindow):
         self.live_overlay.set_output_canvas(canvas_w, canvas_h)
         self.schedule_autosave()
 
+    def choose_canvas_background_image(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn ảnh nền Canvas", self.side_bg_image.text(), "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if path:
+            self.side_bg_image.setText(path)
+            self.side_bg_enabled.setChecked(True)
+            self.side_bg_type.setCurrentText("Hình ảnh")
+
+    def current_canvas_background(self):
+        mode = {"Không": "none", "Mờ video": "blur", "Màu đơn": "solid", "Hình ảnh": "image"}.get(self.side_bg_type.currentText(), "none")
+        if not self.side_bg_enabled.isChecked(): mode = "none"
+        return {
+            "mode": mode, "image_path": self.side_bg_image.text().strip(),
+            "image_fit": self.side_bg_image_fit.currentText().lower(),
+            "color": self.side_bg_color.text().strip() or "#000000",
+            "opacity": self.side_bg_opacity.value(), "blur_strength": self.side_bg_blur.value(),
+            "brightness": self.side_bg_brightness.value(),
+        }
+
     def _preview_playback_state_changed(self, state):
         if hasattr(self, "preview_play_button"):
             self.preview_play_button.setText("❚❚ Pause" if state == QMediaPlayer.PlayingState else "▶ Play")
@@ -5432,6 +5480,8 @@ class MainWindow(QMainWindow):
         try:
             canvas_w, canvas_h = self.project_canvas_dimensions()
             self.live_overlay.set_output_canvas(canvas_w, canvas_h)
+            self.live_overlay.set_video_fit_mode("fit")
+            self.live_overlay.set_canvas_background(self.current_canvas_background())
 
             if self.preview_is_processed:
                 self.live_overlay.set_blur_state(False, self.blur_style.currentText(), self.blur_opacity.value(), [])
@@ -6937,6 +6987,7 @@ class MainWindow(QMainWindow):
             "logo_remove_bg": self.logo_remove_bg.isChecked(),
             "side_bg_enabled": self.side_bg_enabled.isChecked(),
             "side_bg_type": self.side_bg_type.currentText(),
+            "canvas_background": self.current_canvas_background(),
             "overlay_enabled": self.overlay_enabled.isChecked(),
             "overlay_text": self.overlay_text.text(),
             "overlay_font": self.overlay_font.currentFont().family(),
@@ -7067,6 +7118,17 @@ class MainWindow(QMainWindow):
 
         if "logo_path" in data:
             self.logo_path.setText(str(data["logo_path"] or ""))
+        background = dict(data.get("canvas_background", {}) or {})
+        if background:
+            labels = {"none": "Không", "blur": "Mờ video", "solid": "Màu đơn", "image": "Hình ảnh"}
+            self.side_bg_type.setCurrentText(labels.get(str(background.get("mode", "none")), "Không"))
+            self.side_bg_enabled.setChecked(str(background.get("mode", "none")) != "none")
+            self.side_bg_image.setText(str(background.get("image_path", "") or ""))
+            self.side_bg_image_fit.setCurrentText(str(background.get("image_fit", "cover")).title())
+            self.side_bg_color.setText(str(background.get("color", "#000000")))
+            self.side_bg_opacity.setValue(int(background.get("opacity", 100)))
+            self.side_bg_blur.setValue(int(background.get("blur_strength", 24)))
+            self.side_bg_brightness.setValue(int(background.get("brightness", -15)))
         if "overlay_text" in data:
             self.overlay_text.setText(str(data["overlay_text"] or ""))
         if "overlay_font" in data:
@@ -7234,9 +7296,8 @@ class MainWindow(QMainWindow):
         self.update_live_overlay_state()
 
     def gather_export_options(self):
-        fit_mode = "Crop"
-        if self.side_bg_enabled.isChecked():
-            fit_mode = "Blur background" if self.side_bg_type.currentText() == "Mờ video" else "Pad"
+        fit_mode = "Fit"
+        canvas_background = self.current_canvas_background()
 
         source_audio_mode = "Giữ âm gốc"
         if self.mute_original_voice.isChecked():
@@ -7254,6 +7315,13 @@ class MainWindow(QMainWindow):
         return ExportOptions(
             resolution=self.resolution.currentText(),
             fit_mode=fit_mode,
+            canvas_background_mode=canvas_background["mode"],
+            canvas_background_image=canvas_background["image_path"],
+            canvas_background_image_fit=canvas_background["image_fit"],
+            canvas_background_color=canvas_background["color"],
+            canvas_background_opacity=canvas_background["opacity"],
+            canvas_background_blur=canvas_background["blur_strength"],
+            canvas_background_brightness=canvas_background["brightness"],
             codec=self.codec.currentText(),
             encoder=self.encoder.currentText(),
 

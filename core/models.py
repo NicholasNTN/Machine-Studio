@@ -99,7 +99,14 @@ class SubtitleStyle:
 @dataclass
 class ExportOptions:
     resolution: str = "Original"
-    fit_mode: str = "Crop"
+    fit_mode: str = "Fit"
+    canvas_background_mode: str = "none"
+    canvas_background_image: str = ""
+    canvas_background_image_fit: str = "cover"
+    canvas_background_color: str = "#000000"
+    canvas_background_opacity: int = 100
+    canvas_background_blur: int = 24
+    canvas_background_brightness: int = -15
     codec: str = "H.264"
     encoder: str = "Auto (GPU)"
 

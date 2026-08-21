@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from core.subtitle_sizing import preview_font_pixels
+from editor.canvas import calculate_media_rect
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import (
@@ -40,6 +41,10 @@ class InteractivePreviewOverlay(QWidget):
 
         self._frame_image = QImage()
         self._source_crop = QRectF()
+        self.video_fit_mode = "fit"
+        self.canvas_background = {"mode": "none", "color": "#000000"}
+        self._background_pixmap = QPixmap()
+        self._background_loaded_path = ""
 
         self.blur_enabled = False
         self.blur_style = "Trong mờ"
@@ -167,6 +172,18 @@ class InteractivePreviewOverlay(QWidget):
         self.output_width = max(1, int(width))
         self.output_height = max(1, int(height))
         self.set_output_aspect(self.output_width / self.output_height)
+
+    def set_video_fit_mode(self, mode):
+        self.video_fit_mode = "fill" if str(mode).lower() == "fill" else "fit"
+        self.update()
+
+    def set_canvas_background(self, state):
+        self.canvas_background = dict(state or {})
+        path = str(self.canvas_background.get("image_path", "") or "")
+        if path != self._background_loaded_path:
+            self._background_loaded_path = path
+            self._background_pixmap = QPixmap(path) if path and Path(path).exists() else QPixmap()
+        self.update()
 
     def set_preview_zoom(self, zoom: float, reset_pan: bool = False):
         self.preview_zoom = max(0.5, min(3.0, float(zoom or 1.0)))
@@ -315,17 +332,14 @@ class InteractivePreviewOverlay(QWidget):
     def source_crop_rect(self) -> QRectF:
         if self._frame_image.isNull():
             return QRectF()
-        sw = float(self._frame_image.width())
-        sh = float(self._frame_image.height())
-        target_a = max(0.1, float(self.output_aspect))
-        src_a = sw / max(1.0, sh)
+        return QRectF(self._frame_image.rect())
 
-        # Live output preview follows centered Crop, matching default exporter.
-        if src_a > target_a:
-            crop_w = sh * target_a
-            return QRectF((sw - crop_w) / 2, 0, crop_w, sh)
-        crop_h = sw / target_a
-        return QRectF(0, (sh - crop_h) / 2, sw, crop_h)
+    def source_display_rect(self) -> QRectF:
+        canvas = self.video_rect()
+        if self._frame_image.isNull():
+            return canvas
+        rect = calculate_media_rect(self._frame_image.width(), self._frame_image.height(), self.output_width, self.output_height, self.video_fit_mode)
+        return QRectF(canvas.left() + canvas.width() * rect.x / self.output_width, canvas.top() + canvas.height() * rect.y / self.output_height, canvas.width() * rect.width / self.output_width, canvas.height() * rect.height / self.output_height)
 
     def pct_rect(self, zone: dict) -> QRectF:
         vr = self.video_rect()
@@ -415,13 +429,35 @@ class InteractivePreviewOverlay(QWidget):
     # PAINT HELPERS
     # ==========================================================
     def _paint_video(self, p: QPainter):
-        p.fillRect(self.rect(), QColor("#000000"))
+        p.fillRect(self.rect(), QColor("#05080d"))
+        canvas = self.video_rect()
+        mode = str(self.canvas_background.get("mode", "none"))
+        if mode == "solid":
+            color = QColor(str(self.canvas_background.get("color", "#000000")))
+            color.setAlphaF(max(0.0, min(1.0, float(self.canvas_background.get("opacity", 100)) / 100.0)))
+            p.fillRect(canvas, color)
+        elif mode == "image" and not self._background_pixmap.isNull():
+            image = self._background_pixmap
+            fit = str(self.canvas_background.get("image_fit", "cover"))
+            aspect_mode = Qt.IgnoreAspectRatio if fit == "stretch" else (Qt.KeepAspectRatio if fit == "contain" else Qt.KeepAspectRatioByExpanding)
+            scaled = image.scaled(canvas.size().toSize(), aspect_mode, Qt.SmoothTransformation)
+            source = QRectF((scaled.width() - canvas.width()) / 2, (scaled.height() - canvas.height()) / 2, canvas.width(), canvas.height())
+            p.setOpacity(max(0.0, min(1.0, float(self.canvas_background.get("opacity", 100)) / 100.0)))
+            p.drawPixmap(canvas, scaled, source); p.setOpacity(1.0)
+        elif mode == "blur" and not self._frame_image.isNull():
+            tiny = self._frame_image.scaled(48, 48, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            blurred = tiny.scaled(canvas.size().toSize(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            source = QRectF((blurred.width() - canvas.width()) / 2, (blurred.height() - canvas.height()) / 2, canvas.width(), canvas.height())
+            p.setOpacity(max(0.0, min(1.0, float(self.canvas_background.get("opacity", 100)) / 100.0)))
+            p.drawImage(canvas, blurred, source); p.setOpacity(1.0)
+            dim = max(0, min(100, -int(self.canvas_background.get("brightness", -15))))
+            if dim: p.fillRect(canvas, QColor(0, 0, 0, round(255 * dim / 100)))
         if self._frame_image.isNull():
             p.setPen(QColor("#72839a"))
             p.drawText(self.rect(), Qt.AlignCenter, "Chưa có frame video")
             return
 
-        vr = self.video_rect()
+        vr = self.source_display_rect()
         src = self.source_crop_rect()
         self._source_crop = src
         p.drawImage(vr, self._frame_image, src)

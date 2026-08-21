@@ -8,6 +8,7 @@ from .selection_manager import SelectionManager
 from .snap_engine import SnapEngine
 from .timeline_state import TimelineState
 from .subtitle_group import SubtitleGroup, SubtitleGroupStyle
+from .canvas import CanvasBackground
 
 
 class EditorDocument(QObject):
@@ -26,6 +27,7 @@ class EditorDocument(QObject):
         self.layers = LayerManager(self.timeline.layers)
         self.panel_sizes: dict[str, list[int]] = {}
         self.aspect_ratio = "Original"
+        self.canvas_background = CanvasBackground()
         self.subtitle_groups: dict[str, SubtitleGroup] = {}
 
     @property

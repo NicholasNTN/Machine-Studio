@@ -432,6 +432,7 @@ def export_video(
     logo_idx = None
     accompaniment_idx = None
     music_idx = None
+    canvas_background_idx = None
 
     if options.narration_path and Path(options.narration_path).exists():
         narration_idx = input_count
@@ -457,6 +458,11 @@ def export_video(
         if options.background_music_loop:
             cmd += ["-stream_loop", "-1"]
         cmd += ["-i", options.background_music_path]
+        input_count += 1
+
+    if options.canvas_background_mode == "image" and options.canvas_background_image and Path(options.canvas_background_image).exists():
+        canvas_background_idx = input_count
+        cmd += ["-loop", "1", "-i", options.canvas_background_image]
         input_count += 1
 
     # Basic Editor can add multiple timed image layers.
@@ -506,25 +512,35 @@ def export_video(
 
     if target:
         w, h = target
-        if options.fit_mode == "Blur background":
+        background_mode = str(getattr(options, "canvas_background_mode", "none") or "none")
+        if background_mode == "blur":
+            blur = max(1, min(80, int(getattr(options, "canvas_background_blur", 24))))
+            brightness = max(-1.0, min(1.0, float(getattr(options, "canvas_background_brightness", -15)) / 100.0))
+            opacity = max(0.0, min(1.0, float(getattr(options, "canvas_background_opacity", 100)) / 100.0))
             fc += [
                 f"[{current}]split=2[vbg0][vfg0]",
-                f"[vbg0]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur=24:3[vbg]",
+                f"[vbg0]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={blur}:3,eq=brightness={brightness:.3f},format=rgba,colorchannelmixer=aa={opacity:.3f}[vbg]",
                 f"[vfg0]scale={w}:{h}:force_original_aspect_ratio=decrease[vfg]",
                 f"[vbg][vfg]overlay=(W-w)/2:(H-h)/2[vfit]",
             ]
             current = "vfit"
+        elif background_mode == "image" and canvas_background_idx is not None:
+            image_fit = str(getattr(options, "canvas_background_image_fit", "cover"))
+            if image_fit == "stretch": bg_chain = f"scale={w}:{h}"
+            elif image_fit == "contain": bg_chain = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
+            else: bg_chain = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+            opacity = max(0.0, min(1.0, float(getattr(options, "canvas_background_opacity", 100)) / 100.0))
+            fc += [f"[{canvas_background_idx}:v]{bg_chain},format=rgba,colorchannelmixer=aa={opacity:.3f}[vbg]", f"[{current}]scale={w}:{h}:force_original_aspect_ratio=decrease[vfg]", f"[vbg][vfg]overlay=(W-w)/2:(H-h)/2[vfit]"]
+            current = "vfit"
         else:
-            if options.fit_mode == "Pad":
-                chain = (
-                    f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-                    f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
-                )
-            else:
+            if str(options.fit_mode).lower() == "fill":
                 chain = (
                     f"scale={w}:{h}:force_original_aspect_ratio=increase,"
                     f"crop={w}:{h}"
                 )
+            else:
+                color = str(getattr(options, "canvas_background_color", "#000000") or "#000000").replace("#", "0x")
+                chain = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:{color}"
             fc.append(f"[{current}]{chain}[vfit]")
             current = "vfit"
 
@@ -1385,4 +1401,3 @@ def build_timeline_audio(chunks: list[dict], output_path: str, fit_percent: int 
         output_path,
     ])
     return output_path
-
