@@ -12,14 +12,14 @@ class EditorWorkspace(QWidget):
         self.vertical_splitter = QSplitter(Qt.Vertical); self.vertical_splitter.setChildrenCollapsible(False); self.vertical_splitter.setHandleWidth(6)
         self.horizontal_splitter = QSplitter(Qt.Horizontal); self.horizontal_splitter.setChildrenCollapsible(False); self.horizontal_splitter.setHandleWidth(6)
         left = QFrame(); left.setObjectName("leftWorkspace"); left.setMinimumWidth(240); left_layout = QHBoxLayout(left); left_layout.setContentsMargins(0, 0, 0, 0); left_layout.setSpacing(0)
-        nav = QFrame(); nav.setObjectName("toolNav"); nav_layout = QVBoxLayout(nav); nav_layout.setContentsMargins(5, 8, 5, 8); nav_layout.setSpacing(4)
+        nav = QFrame(); nav.setObjectName("toolNav"); nav.setFixedWidth(62); nav_layout = QVBoxLayout(nav); nav_layout.setContentsMargins(3, 6, 3, 6); nav_layout.setSpacing(3)
         self.page_stack = QStackedWidget(); self.page_stack.setMinimumWidth(176)
         self._tool_indexes = {key: index for index, key in enumerate(pages)}
         self._tool_buttons = {}
         for page in pages.values(): self.page_stack.addWidget(page)
         group = QButtonGroup(self); group.setExclusive(True)
         for index, (key, icon, label) in enumerate(self.TOOLS):
-            button = QPushButton(f"{icon}\n{label}"); button.setObjectName("toolButton"); button.setCheckable(True); button.setFixedSize(62, 60); button.clicked.connect(lambda checked=False, i=index, k=key: (self.page_stack.setCurrentIndex(i), self.toolSelected.emit(k))); group.addButton(button); nav_layout.addWidget(button)
+            button = QPushButton(f"{icon}\n{label}"); button.setObjectName("toolButton"); button.setToolTip(label); button.setCheckable(True); button.setFixedSize(56, 52); button.clicked.connect(lambda checked=False, i=index, k=key: (self.page_stack.setCurrentIndex(i), self.toolSelected.emit(k))); group.addButton(button); nav_layout.addWidget(button)
             self._tool_buttons[key] = button
             if index == 0: button.setChecked(True)
         nav_layout.addStretch(1); left_layout.addWidget(nav); left_layout.addWidget(self.page_stack, 1)

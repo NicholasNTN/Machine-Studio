@@ -18,10 +18,10 @@ class TopBar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("topBar")
-        self.setMinimumHeight(56)
+        self.setFixedHeight(42)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 7, 12, 7)
-        layout.setSpacing(5)
+        layout.setContentsMargins(8, 3, 8, 3)
+        layout.setSpacing(3)
 
         brand = QLabel("MACHINE STUDIO")
         brand.setObjectName("brandLabel")
@@ -31,6 +31,7 @@ class TopBar(QFrame):
             button = QPushButton(label)
             button.setObjectName("navButton")
             button.setCheckable(key != "menu")
+            button.setFixedHeight(30)
             button.clicked.connect(lambda checked=False, value=key: self.sectionRequested.emit(value))
             self.buttons[key] = button
             layout.addWidget(button)
