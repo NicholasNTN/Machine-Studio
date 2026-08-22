@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 from .widgets import MachineToolButton
+from .motion import fade_in
 
 from core.last_used_preferences import sanitize_workspace_splitter_sizes
 
@@ -22,7 +23,7 @@ class EditorWorkspace(QWidget):
         for page in pages.values(): self.page_stack.addWidget(page)
         group = QButtonGroup(self); group.setExclusive(True)
         for index, (key, icon_name, label) in enumerate(self.TOOLS):
-            button = MachineToolButton(label, icon_name); button.setFixedSize(48, 48); button.clicked.connect(lambda checked=False, i=index, k=key: (self.page_stack.setCurrentIndex(i), self.toolSelected.emit(k))); group.addButton(button); nav_layout.addWidget(button)
+            button = MachineToolButton(label, icon_name); button.setFixedSize(48, 48); button.clicked.connect(lambda checked=False, i=index, k=key: self._activate_tool(i, k)); group.addButton(button); nav_layout.addWidget(button)
             self._tool_buttons[key] = button
             if index == 0: button.setChecked(True)
         nav_layout.addStretch(1); left_layout.addWidget(nav); left_layout.addWidget(self.page_stack, 1)
@@ -33,10 +34,12 @@ class EditorWorkspace(QWidget):
         self.horizontal_splitter.splitterMoved.connect(lambda *_: self.splitterSizesChanged.emit()); self.vertical_splitter.splitterMoved.connect(lambda *_: self.splitterSizesChanged.emit()); root.addWidget(self.vertical_splitter)
 
     def sizes(self): return {"workspace_horizontal": self.horizontal_splitter.sizes(), "workspace_vertical": self.vertical_splitter.sizes()}
+    def _activate_tool(self, index, key):
+        self.page_stack.setCurrentIndex(index); fade_in(self.page_stack.currentWidget()); self.toolSelected.emit(key)
     def set_tool(self, key):
         """Switch left tools through the workspace's stable public API."""
         if key not in self._tool_indexes: return False
-        self.page_stack.setCurrentIndex(self._tool_indexes[key])
+        self.page_stack.setCurrentIndex(self._tool_indexes[key]); fade_in(self.page_stack.currentWidget())
         self._tool_buttons[key].setChecked(True)
         self.toolSelected.emit(key)
         return True

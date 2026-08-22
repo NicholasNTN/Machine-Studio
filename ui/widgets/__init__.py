@@ -19,7 +19,7 @@ class MachineButton(QPushButton):
 
 class MachineIconButton(QToolButton):
     def __init__(self, icon_name, tooltip, parent=None):
-        super().__init__(parent); self.setIcon(icon(icon_name)); self.setToolTip(tooltip)
+        super().__init__(parent); self.setProperty("variant", "ghost"); self.setIcon(icon(icon_name)); self.setToolTip(tooltip)
         self.setAccessibleName(tooltip); self.setCursor(Qt.PointingHandCursor); self.setAutoRaise(True)
 
 
@@ -47,7 +47,7 @@ class MachineCard(QFrame):
 
 class MachineSection(QFrame):
     def __init__(self, title, description="", parent=None):
-        super().__init__(parent); self.setObjectName("machineCard"); layout = QVBoxLayout(self)
+        super().__init__(parent); self.setObjectName("machineSection"); layout = QVBoxLayout(self); layout.setContentsMargins(8, 0, 8, 8); layout.setSpacing(8)
         heading = QLabel(title); heading.setObjectName("sectionTitle"); layout.addWidget(heading)
         if description:
             hint = QLabel(description); hint.setObjectName("panelDescription"); hint.setWordWrap(True); layout.addWidget(hint)
@@ -81,7 +81,7 @@ class MachineToast(QFrame):
         row = QHBoxLayout(self); row.setContentsMargins(12, 8, 12, 8)
         self.label = QLabel(); row.addWidget(self.label); self.hide()
 
-    def showMessage(self, message, timeout=3000):
+    def showMessage(self, message, timeout=2800):
         self.label.setText(str(message)); self.adjustSize(); self.show(); self.raise_()
         QTimer.singleShot(max(500, int(timeout)), self.hide)
 
@@ -104,7 +104,7 @@ class MachineToolbar(QFrame):
 class MachineToolbarGroup(QFrame):
     def __init__(self, label="", parent=None):
         super().__init__(parent); self.setObjectName("toolbarGroup"); row = QHBoxLayout(self)
-        row.setContentsMargins(3, 0, 3, 0); row.setSpacing(2); self.layout = row
+        row.setContentsMargins(4, 0, 4, 0); row.setSpacing(4); self.layout = row
         if label:
             caption = QLabel(label); caption.setObjectName("toolbarLabel"); row.addWidget(caption)
 

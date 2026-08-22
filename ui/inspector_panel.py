@@ -13,8 +13,7 @@ class InspectorPanel(QFrame):
 
     def __init__(self, selection_manager=None, parent=None):
         super().__init__(parent); self.setObjectName("inspectorPanel"); self.setMinimumWidth(280); self._loading = False; self._controls = {}
-        root = QVBoxLayout(self); root.setContentsMargins(10, 10, 10, 10)
-        root.addWidget(MachinePanelHeader("Video", "Selected clip"))
+        root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0)
         self.stack = QStackedWidget(); root.addWidget(self.stack, 1); self.empty_page = self._empty_page(); self.stack.addWidget(self.empty_page); self.pages = {}
         for kind in self.KINDS:
             page = self._make_page(kind); self.pages[kind] = page; self.stack.addWidget(page)
@@ -85,7 +84,7 @@ class InspectorPanel(QFrame):
 
     def _make_video_page(self):
         scroll = QScrollArea(); scroll.setWidgetResizable(True); body = QWidget(); layout = QVBoxLayout(body)
-        layout.setContentsMargins(2, 2, 2, 2); layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(12)
 
         transform = MachineSection("Transform")
         tf = QFormLayout(); tf.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter); tf.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)

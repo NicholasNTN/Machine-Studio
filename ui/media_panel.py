@@ -69,7 +69,7 @@ class MediaPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent); self.setObjectName("toolPage"); self.setMinimumWidth(190); self._paths = []; self._metadata = {}; self._display_names = {}
-        layout = QVBoxLayout(self); layout.setContentsMargins(10, 10, 10, 10)
+        layout = QVBoxLayout(self); layout.setContentsMargins(12, 12, 12, 12); layout.setSpacing(8)
         header = MachinePanelHeader("Media", "Project assets"); more = MachineIconButton("more", "Media options"); header.actions.addWidget(more); layout.addWidget(header)
         self.drop_area = QFrame(); self.drop_area.setObjectName("mediaDropArea"); drop = QVBoxLayout(self.drop_area); drop.addStretch(1)
         upload = QLabel(); upload.setPixmap(icon("upload", "textMuted").pixmap(26, 26)); upload.setAlignment(Qt.AlignCenter); drop.addWidget(upload)

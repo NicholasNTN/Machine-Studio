@@ -29,7 +29,7 @@ def main():
         {"name": "Factory B", "source_start": 0.0, "source_end": 25.0, "source_duration": 25.0, "enabled": True},
     ])
     output = Path(tempfile.gettempdir()) / "machine_studio_ui_previews"; output.mkdir(parents=True, exist_ok=True)
-    for width, height in ((1920, 1080), (1600, 900), (1366, 768)):
+    for width, height in ((2560, 1440), (1920, 1080), (1600, 900), (1366, 768)):
         window.resize(width, height); window.show(); qt.processEvents()
         path = output / f"machine-studio-{width}x{height}.png"
         if not window.grab().save(str(path)): raise RuntimeError(f"Could not save {path}")

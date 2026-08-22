@@ -32,18 +32,19 @@ class TopBar(QFrame):
         self.buttons = {}
         for key, icon_name, label in self.SECTIONS:
             button = MachineNavButton(label, icon_name)
-            button.setFixedHeight(30)
+            button.setFixedHeight(32)
             button.clicked.connect(lambda checked=False, value=key: self.sectionRequested.emit(value))
             self.buttons[key] = button
             layout.addWidget(button)
         layout.addStretch(1)
 
         self.saved_dot = QLabel("●"); self.saved_dot.setObjectName("savedDot"); layout.addWidget(self.saved_dot)
-        self.project_status = QLabel("Saved")
+        self.project_status = QLabel("Autosaved")
         self.project_status.setObjectName("projectStatus")
         layout.addWidget(self.project_status)
         export = MachineButton("Export", variant="primary", icon_name="export")
         export.setObjectName("topExport")
+        export.setFixedHeight(34)
         export.clicked.connect(self.exportRequested)
         layout.addWidget(export)
 

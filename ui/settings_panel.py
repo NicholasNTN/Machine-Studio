@@ -6,7 +6,7 @@ class SettingsPanel(QFrame):
     TITLES = {"media": ("Media", "Clip and library details"), "voice": ("Voice", "Narration and audio preview"), "subtitle": ("Phụ đề", "Subtitle content and appearance"), "text": ("Text", "Manual text layer properties"), "blur": ("Blur", "Detection and blur zones"), "customize": ("Tùy chỉnh", "Logo, speed, and canvas"), "advanced": ("Nâng cao", "Background and overlay controls"), "video_clip": ("Video", "Selected clip properties")}
     def __init__(self, pages, parent=None):
         super().__init__(parent); self.setObjectName("inspectorPanel"); self.setMinimumWidth(340)
-        layout = QVBoxLayout(self); layout.setContentsMargins(10, 10, 10, 10)
+        layout = QVBoxLayout(self); layout.setContentsMargins(12, 12, 12, 12); layout.setSpacing(8)
         self.title = QLabel("Media"); self.title.setObjectName("panelTitle"); layout.addWidget(self.title)
         self.description = QLabel("Clip and library details"); self.description.setObjectName("panelDescription"); self.description.setWordWrap(True); layout.addWidget(self.description)
         self.stack = QStackedWidget(); self._indexes = {}

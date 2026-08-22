@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QFont
 from PySide6.QtWidgets import QWidget
+from ui.icons import machine_pixmap
 from ui.theme import tokens
 
 from core import editor_engine
@@ -150,48 +151,61 @@ class BasicTimelineWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
 
-        palette = self.palette()
-        bg = palette.window().color()
-        fg = palette.windowText().color()
-        p.fillRect(self.rect(), bg)
-
         colors = tokens()["color"]
+        p.fillRect(self.rect(), QColor(colors["timeline"]))
+        p.fillRect(QRectF(0, 0, self.width(), 34), QColor(colors["ruler"]))
+        p.setPen(QPen(QColor("#293543"), 1)); p.drawLine(0, 33, self.width(), 33)
         # Professional fixed-order track lanes and compact headers.
         for index, (key, label) in enumerate(self.TRACKS):
             top = 34 + index * 40
-            p.fillRect(QRectF(0, top, self.width(), 39), QColor(colors["surface"]) if index % 2 == 0 else QColor(colors["surfaceRaised"]))
+            p.fillRect(QRectF(0, top, self.width(), 39), QColor(colors["timeline"]))
+            p.fillRect(QRectF(0, top, self.HEADER_WIDTH, 39), QColor(colors["input"]))
+            p.setPen(QColor(colors["border"])); p.drawLine(int(self.HEADER_WIDTH), top, int(self.HEADER_WIDTH), top + 39)
             p.setPen(QColor(colors["border"])); p.drawLine(0, top + 39, self.width(), top + 39)
             p.setPen(QColor(colors["textSecondary"])); p.drawText(QRectF(8, top, 72, 39), Qt.AlignVCenter | Qt.AlignLeft, label)
             track = next((track for track in self.tracks if getattr(getattr(track, "kind", ""), "value", "") == key), None)
-            states = ("L" if track and track.locked else "", "V" if not track or track.visible else "", "M" if track and track.muted else "")
-            p.setPen(QColor(colors["textMuted"]))
-            for state_index, state in enumerate(states):
-                p.drawText(QRectF(84 + state_index * 15, top, 15, 39), Qt.AlignCenter, state)
+            states = (
+                ("lock", "accent" if track and track.locked else "textMuted"),
+                ("visible" if not track or track.visible else "hidden", "textMuted"),
+                ("muted" if track and track.muted else "volume", "textMuted"),
+            )
+            for state_index, (state, color) in enumerate(states):
+                p.drawPixmap(84 + state_index * 15, top + 13, machine_pixmap(state, color, 14))
 
         # ruler
-        p.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 110), 1))
         total = self.visible_duration
         major = self.major_tick_interval if self.auto_fit else min((0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300), key=lambda value: abs(value * self.zoom - 60))
+        minor = major / 5.0
+        t = minor
+        p.setPen(QPen(QColor("#465260"), 1))
+        while t <= total + major:
+            if abs((t / major) - round(t / major)) > 0.001:
+                x = self.time_to_x(t); p.drawLine(int(x), 23, int(x), 28)
+            t += minor
+        ruler_font = QFont(p.font()); ruler_font.setPixelSize(9); p.setFont(ruler_font)
+        p.setPen(QPen(QColor("#687586"), 1))
         t = 0.0
         while t <= total + major:
             x = self.time_to_x(t)
             p.drawLine(int(x), 18, int(x), 28)
+            p.setPen(QColor("#A9B3C0"))
             p.drawText(int(x + 2), 15, f"{t:.0f}s")
+            p.setPen(QPen(QColor("#687586"), 1))
             t += major
 
         rects = self._clip_rects()
         for i, (clip, rect) in enumerate(zip(self.clips, rects)):
             selected = i == self.selected_index
-            base = QColor(colors["accent"]) if not selected else QColor(colors["success"])
+            base = QColor(colors["accent"] if i % 2 == 0 else colors["success"])
             if not clip.get("enabled", True):
-                base = QColor(90, 90, 90)
-            p.setPen(QPen(QColor(colors["textPrimary"]), 2 if selected else 1))
+                base = QColor(colors["disabledSurface"])
+            p.setPen(QPen(QColor(colors["textPrimary"] if selected else colors["borderStrong"]), 2 if selected else 1))
             p.setBrush(base)
-            p.drawRoundedRect(rect, 5, 5)
+            p.drawRoundedRect(rect, 4, 4)
 
             p.setPen(Qt.white)
-            font = QFont()
-            font.setPointSize(9)
+            font = QFont(p.font())
+            font.setPixelSize(10)
             font.setBold(selected)
             p.setFont(font)
             name = str(clip.get("name", "Clip"))

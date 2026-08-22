@@ -47,6 +47,20 @@ class EditorDomainTests(unittest.TestCase):
         self.assertTrue({"background", "surface", "surfaceRaised", "textPrimary", "accent", "danger"} <= values["color"].keys())
         self.assertFalse(any(key.startswith("Q") for group in values.values() for key in group))
 
+    def test_ui_visual_system_uses_round_three_palette_and_scale(self):
+        values = json.loads(Path("design/tokens.json").read_text(encoding="utf-8"))
+        self.assertEqual(values["color"]["background"], "#090D12")
+        self.assertEqual(values["color"]["surface"], "#0F141B")
+        self.assertEqual(values["color"]["surfaceRaised"], "#141B24")
+        self.assertEqual(values["color"]["surfaceElevated"], "#18212C")
+        self.assertEqual(values["color"]["accent"], "#4C8DFF")
+        self.assertEqual(values["color"]["playhead"], "#FF5968")
+        self.assertEqual(list(values["spacing"].values()), [4, 6, 8, 12, 16, 20, 24])
+        self.assertEqual(
+            [values["radius"][key] for key in ("tiny", "small", "medium", "button", "card", "large", "dialog")],
+            [4, 6, 8, 8, 10, 12, 14],
+        )
+
     def test_main_window_static_theme_is_centralized(self):
         source = Path("app.py").read_text(encoding="utf-8")
         style_method = next(node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef) and node.name == "_style")

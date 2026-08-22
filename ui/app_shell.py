@@ -14,13 +14,13 @@ class AppShell(QWidget):
         self.setObjectName("appShell")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
         self.top_bar = TopBar(self)
         layout.addWidget(self.top_bar)
         layout.addWidget(content, 1)
         self.toast = MachineToast(self)
 
-    def show_toast(self, message, timeout=3000):
+    def show_toast(self, message, timeout=2800):
         self.toast.showMessage(message, timeout)
         self.toast.move(max(12, self.width() - self.toast.width() - 20), 58)
 
