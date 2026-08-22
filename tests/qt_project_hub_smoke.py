@@ -4,14 +4,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from core.application_controller import ApplicationController
+from core.application_controller import ApplicationController, ApplicationState
 from core.models import AIProject
 from core.project_manager import ProjectManager
 from ui.project_hub import ProjectCard, ProjectHubWindow
@@ -46,17 +46,27 @@ def main():
         hub.close()
 
         controller = ApplicationController(qt, test_root)
-        assert controller.editor is None and not controller.hub.isVisible()
+        assert controller.editor is None and not controller.hub.isVisible() and controller.state == ApplicationState.PROJECT_HUB
+        assert not qt.quitOnLastWindowClosed()
         controller.show_project_hub(); qt.processEvents(); assert controller.hub.isVisible()
-        record = controller.project_manager.create_project("Lifecycle")
-        assert controller.open_project(record.project_path); qt.processEvents()
-        assert not controller.hub.isVisible() and controller.editor.isVisible()
-        assert Path(controller.editor.workspace_project_path).resolve() == Path(record.project_path).resolve()
-        assert controller.editor.project.name == "Lifecycle"
-        assert hasattr(controller.editor, "editor_timeline")
-        controller.return_to_project_hub(); qt.processEvents()
-        assert controller.editor is None and controller.hub.isVisible()
-        controller.hub.close()
+        cycle_records = [controller.project_manager.create_project(name) for name in ("Lifecycle A", "Lifecycle B", "Lifecycle C")]
+        editor_type = None
+        for record in cycle_records:
+            assert controller.open_project(record.project_path); qt.processEvents()
+            editor = controller.editor; editor_type = type(editor)
+            assert controller.state == ApplicationState.EDITOR
+            assert not controller.hub.isVisible() and editor.isVisible()
+            assert Path(editor.workspace_project_path).resolve() == Path(record.project_path).resolve()
+            assert editor.project.name == record.name and hasattr(editor, "editor_timeline")
+            assert sum(isinstance(widget, editor_type) and widget.isVisible() for widget in qt.topLevelWidgets()) == 1
+            editor.close(); qt.processEvents(); QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete); qt.processEvents()
+            assert controller.editor is None and controller.hub.isVisible()
+            assert controller.state == ApplicationState.PROJECT_HUB and not qt.closingDown()
+            refreshed = next(card for card in controller.hub.cards if card.record.project_path == record.project_path)
+            assert refreshed.edited.text() == "Edited just now"
+            assert not any(isinstance(widget, editor_type) and widget.isVisible() for widget in qt.topLevelWidgets())
+        controller.hub.close(); qt.processEvents()
+        assert controller.state == ApplicationState.EXITING and not controller.hub.isVisible()
     print("qt-project-hub-smoke-ok")
 
 

@@ -587,6 +587,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, settings_root=None):
         super().__init__()
+        self._application_exiting = False
         self.setWindowTitle(f"{APP_NAME} {VERSION}")
         self.resize(1720, 980)
         self.setAcceptDrops(True)
@@ -4902,35 +4903,14 @@ class MainWindow(QMainWindow):
             self.status("Đã tự khôi phục project gần nhất.")
 
     def return_to_projects(self):
-        running = [worker for worker in self._active_workers if worker and worker.isRunning()]
-        if running:
-            answer = QMessageBox.question(
-                self, "Export is still running",
-                "Export or another background task is still running.\nStop it and return to Projects?",
-                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
-            )
-            if answer != QMessageBox.Yes: return
-            self.stop_current()
-            for worker in running: worker.requestInterruption()
-            def return_when_idle():
-                if any(worker and worker.isRunning() for worker in self._active_workers):
-                    QTimer.singleShot(100, return_when_idle); return
-                self.autosave_project(); self.returnToProjectsRequested.emit()
-            QTimer.singleShot(100, return_when_idle); return
-        self.autosave_project(); self.returnToProjectsRequested.emit()
+        self.close()
 
     def closeEvent(self, event: QCloseEvent):
         running = [w for w in self._active_workers if w and w.isRunning()]
         if running:
-            answer = QMessageBox.question(
-                self, "Tác vụ đang chạy",
-                "Ứng dụng vẫn đang xử lý nền/xuất video. Dừng tác vụ trước khi thoát để tránh hỏng file?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if answer == QMessageBox.No:
-                event.ignore()
-                return
+            box = QMessageBox(QMessageBox.Warning, "Export is still running", "Export or another background task is still running.\nStop Export and return to Projects?", parent=self)
+            cancel = box.addButton("Cancel", QMessageBox.RejectRole); stop = box.addButton("Stop Export and Return", QMessageBox.AcceptRole); stop.setProperty("variant", "danger"); box.setDefaultButton(cancel); box.exec()
+            if box.clickedButton() != stop: event.ignore(); return
             self.stop_current()
             for worker in list(running):
                 worker.requestInterruption()
@@ -4948,6 +4928,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         event.accept()
+        if not self._application_exiting:
+            QTimer.singleShot(0, self.returnToProjectsRequested.emit)
 
     # ==================================================================
     # AI STUDIO
@@ -9259,6 +9241,7 @@ def main():
     install_crash_logging()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setQuitOnLastWindowClosed(False)
     from core.application_controller import ApplicationController
     controller = ApplicationController(app, ROOT)
     controller.show_project_hub()

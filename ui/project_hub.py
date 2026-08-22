@@ -109,11 +109,12 @@ class ProjectCard(QFrame):
 class ProjectHubWindow(QMainWindow):
     createProjectRequested = Signal(str)
     openProjectRequested = Signal(str)
+    closeRequested = Signal()
 
     SORTS = (("Last modified", "modified"), ("Name A–Z", "name_asc"), ("Name Z–A", "name_desc"), ("Created date", "created"))
 
     def __init__(self, manager: ProjectManager, parent=None):
-        super().__init__(parent); self.manager = manager; self.records = []; self.cards = []; self._columns = 0
+        super().__init__(parent); self.manager = manager; self.records = []; self.cards = []; self._columns = 0; self._controller_managed = False; self._allow_close = False
         self.setObjectName("projectHub"); self.setWindowTitle("Machine Studio — Projects"); self.resize(1180, 760); self.setMinimumSize(900, 600)
         central = QWidget(); self.setCentralWidget(central); root = QVBoxLayout(central); root.setContentsMargins(24, 20, 24, 20); root.setSpacing(16)
         top = QHBoxLayout(); mark = QLabel(); mark.setPixmap(icon("brand", "accent", 20).pixmap(20, 20)); top.addWidget(mark)
@@ -197,3 +198,10 @@ class ProjectHubWindow(QMainWindow):
         if box.clickedButton() == confirm:
             try: self.manager.delete_project(path); self.refresh()
             except Exception as exc: QMessageBox.critical(self, title, str(exc))
+
+    def closeEvent(self, event):
+        if self._controller_managed and not self._allow_close:
+            event.ignore(); self.closeRequested.emit()
+            if self._allow_close: event.accept()
+            return
+        event.accept()
