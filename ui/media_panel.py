@@ -17,12 +17,12 @@ class MediaCard(QFrame):
 
     def __init__(self, path: str, duration: float = 0.0, thumbnail_path: str = "", display_name="", parent=None):
         super().__init__(parent); self.path = str(path); self._press_pos = None; self._full_name = display_name or Path(self.path).name
-        self.setObjectName("mediaCard"); self.setProperty("selected", False); self.setCursor(Qt.PointingHandCursor); self.setMinimumHeight(164); self.setToolTip(self._full_name)
-        row = QVBoxLayout(self); row.setContentsMargins(7, 7, 7, 7); row.setSpacing(7)
-        thumb = QLabel(); thumb.setObjectName("mediaThumb"); thumb.setAlignment(Qt.AlignCenter); thumb.setMinimumHeight(108); thumb.setPixmap(icon("play").pixmap(22, 22))
-        pixmap = QPixmap(thumbnail_path)
-        if not pixmap.isNull(): thumb.setPixmap(pixmap.scaled(240, 135, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        row.addWidget(thumb, 1)
+        self.setObjectName("mediaCard"); self.setProperty("selected", False); self.setCursor(Qt.PointingHandCursor); self.setFixedHeight(140); self.setToolTip(f"{self._full_name}\n{self.path}")
+        row = QVBoxLayout(self); row.setContentsMargins(6, 6, 6, 5); row.setSpacing(4)
+        self.thumb = QLabel(); self.thumb.setObjectName("mediaThumb"); self.thumb.setAlignment(Qt.AlignCenter); self.thumb.setMinimumHeight(82); self.thumb.setMaximumHeight(92)
+        self._thumbnail_source = QPixmap(thumbnail_path)
+        self.thumb.setPixmap(icon("play").pixmap(20, 20))
+        row.addWidget(self.thumb, 1)
         self.name_label = QLabel(self._full_name); self.name_label.setWordWrap(False); self.name_label.setObjectName("mediaName"); row.addWidget(self.name_label)
         meta = QHBoxLayout()
         seconds = max(0, int(duration or 0)); duration_label = MachineBadge(f"{seconds // 3600:02d}:{seconds // 60 % 60:02d}:{seconds % 60:02d}" if seconds else "VIDEO")
@@ -33,6 +33,8 @@ class MediaCard(QFrame):
     def resizeEvent(self, event):
         super().resizeEvent(event); width = max(40, self.name_label.width())
         self.name_label.setText(QFontMetrics(self.name_label.font()).elidedText(self._full_name, Qt.ElideMiddle, width))
+        if not self._thumbnail_source.isNull():
+            self.thumb.setPixmap(self._thumbnail_source.scaled(self.thumb.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
 
     def mousePressEvent(self, event):
         self._press_pos = event.position(); self.setProperty("selected", True); self.style().unpolish(self); self.style().polish(self); self.selected.emit(self.path); super().mousePressEvent(event)
@@ -75,7 +77,7 @@ class MediaPanel(QWidget):
         hint = QLabel("Drop video, audio, or images here"); hint.setObjectName("hint"); hint.setAlignment(Qt.AlignCenter); drop.addWidget(hint); drop.addStretch(1); self.drop_area.setMinimumHeight(124); layout.addWidget(self.drop_area)
         buttons = QHBoxLayout(); add = MachineButton("Import Media", variant="primary", icon_name="import"); add.clicked.connect(self.addFilesRequested); folder = MachineButton("Folder", icon_name="folder"); folder.setToolTip("Import Folder"); folder.clicked.connect(self.importFolderRequested); buttons.addWidget(add, 1); buttons.addWidget(folder); layout.addLayout(buttons)
         self.search = MachineSearchField("Search media"); self.search.textChanged.connect(self._render); layout.addWidget(self.search)
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.cards = QWidget(); self.card_layout = QVBoxLayout(self.cards); self.card_layout.setContentsMargins(0, 0, 0, 0); self.scroll.setWidget(self.cards); layout.addWidget(self.scroll, 1)
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.cards = QWidget(); self.card_layout = QVBoxLayout(self.cards); self.card_layout.setContentsMargins(0, 0, 0, 0); self.card_layout.setSpacing(7); self.scroll.setWidget(self.cards); layout.addWidget(self.scroll, 1)
 
     def set_media(self, paths: list[str]) -> None:
         self._paths = list(dict.fromkeys(str(path) for path in paths if path)); self._render()
