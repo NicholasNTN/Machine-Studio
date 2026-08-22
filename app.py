@@ -2436,6 +2436,7 @@ class MainWindow(QMainWindow):
         self.editor_timeline_scroll.setMinimumHeight(105)
         self.editor_timeline = BasicTimelineWidget()
         self.editor_timeline_scroll.setWidget(self.editor_timeline)
+        self.editor_timeline.attach_viewport(self.editor_timeline_scroll.viewport())
 
         self.editor_timeline.clipSelected.connect(
             self.editor_clip_selected
@@ -2454,12 +2455,14 @@ class MainWindow(QMainWindow):
         self.editor_timeline.mediaDropped.connect(self._timeline_media_dropped)
 
         zoom_box = QVBoxLayout()
-        zoom_box.addWidget(QLabel("Zoom"))
+        fit_timeline = MachineIconButton("reset", "Fit timeline to viewport")
+        fit_timeline.clicked.connect(self.editor_timeline.fit_to_viewport)
+        zoom_box.addWidget(fit_timeline)
         self.editor_zoom = QSlider(Qt.Vertical)
         self.editor_zoom.setRange(8, 80)
         self.editor_zoom.setValue(14)
         self.editor_zoom.valueChanged.connect(
-            self.editor_timeline.set_zoom
+            lambda value: self.editor_timeline.set_zoom(value, user_modified=True)
         )
         zoom_box.addWidget(self.editor_zoom, 1)
 

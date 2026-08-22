@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from PySide6.QtCore import QEvent, Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QFont
 from PySide6.QtWidgets import QWidget
 from ui.theme import tokens
 
 from core import editor_engine
+from editor.timeline_view import compute_auto_timeline_view
 
 
 class BasicTimelineWidget(QWidget):
@@ -26,6 +27,10 @@ class BasicTimelineWidget(QWidget):
         self.timeline_items = []
         self.tracks = []
         self.zoom = 14.0
+        self.visible_duration = 70.0
+        self.major_tick_interval = 5.0
+        self.auto_fit = True
+        self._viewport = None
         self.selected_index = -1
         self.selected_item_id = ""
         self.playhead = 0.0
@@ -54,10 +59,30 @@ class BasicTimelineWidget(QWidget):
         self.tracks = list(tracks or [])
         self.update()
 
-    def set_zoom(self, value):
+    def set_zoom(self, value, user_modified=True):
         self.zoom = max(6.0, min(120.0, float(value)))
+        if user_modified: self.auto_fit = False
         self._update_width()
         self.update()
+
+    def fit_to_viewport(self):
+        self.auto_fit = True; self._update_width(); self.update()
+
+    def attach_viewport(self, viewport):
+        if self._viewport is viewport: return
+        if self._viewport is not None: self._viewport.removeEventFilter(self)
+        self._viewport = viewport; viewport.installEventFilter(self); self._update_width()
+
+    def eventFilter(self, watched, event):
+        if watched is self._viewport and event.type() == QEvent.Resize and self.auto_fit:
+            self._update_width(); self.update()
+        return super().eventFilter(watched, event)
+
+    def content_duration(self):
+        return max(editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
+
+    def time_to_x(self, seconds): return self.HEADER_WIDTH + max(0.0, float(seconds)) * self.zoom
+    def x_to_time(self, x): return max(0.0, min(self.visible_duration, (float(x) - self.HEADER_WIDTH) / max(0.1, self.zoom)))
 
     def set_selected(self, index):
         self.selected_index = int(index)
@@ -72,11 +97,17 @@ class BasicTimelineWidget(QWidget):
         self.update()
 
     def _update_width(self):
-        duration = max(70.0,
-            editor_engine.total_duration(self.clips),
-            max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0),
-        )
-        width = max(700, int(70 + duration * self.zoom))
+        content = self.content_duration()
+        viewport_width = max(1, self._viewport.width()) if self._viewport is not None else max(700, self.width())
+        if self.auto_fit:
+            view = compute_auto_timeline_view(viewport_width, content, header_width=self.HEADER_WIDTH)
+            self.visible_duration = view.visible_duration; self.zoom = view.pixels_per_second; self.major_tick_interval = view.major_tick_interval
+            width = viewport_width
+        else:
+            minimum_span = max(5.0, content + max(5.0, content * 0.05))
+            viewport_span = max(1.0, viewport_width - self.HEADER_WIDTH) / self.zoom
+            self.visible_duration = max(minimum_span, viewport_span)
+            width = max(viewport_width, int(self.HEADER_WIDTH + self.visible_duration * self.zoom))
         self.setMinimumWidth(width)
         self.resize(width, max(96, self.height()))
 
@@ -94,7 +125,7 @@ class BasicTimelineWidget(QWidget):
         height = 34.0
         for clip in self.clips:
             dur = editor_engine.clip_duration(clip)
-            raw_x = self.HEADER_WIDTH + cursor * self.zoom
+            raw_x = self.time_to_x(cursor)
             raw_w = max(2.0, dur * self.zoom)
             # 1px visual separation without changing the timeline scale.
             rects.append(
@@ -107,11 +138,7 @@ class BasicTimelineWidget(QWidget):
         return []
 
     def _time_at_x(self, x):
-        total = max(70.0, editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
-        return max(
-            0.0,
-            min(total, (float(x) - self.HEADER_WIDTH) / max(0.1, self.zoom)),
-        )
+        return self.x_to_time(x)
 
     def _handle_rect(self, rect, left=True):
         w = 9.0
@@ -143,11 +170,11 @@ class BasicTimelineWidget(QWidget):
 
         # ruler
         p.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 110), 1))
-        total = max(70.0, editor_engine.total_duration(self.clips), max((float(getattr(item, "end", 0.0)) for item in self.timeline_items), default=0.0))
-        major = 5.0 if self.zoom < 10 else 2.0 if self.zoom < 45 else 1.0
+        total = self.visible_duration
+        major = self.major_tick_interval if self.auto_fit else min((0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300), key=lambda value: abs(value * self.zoom - 60))
         t = 0.0
         while t <= total + major:
-            x = self.HEADER_WIDTH + t * self.zoom
+            x = self.time_to_x(t)
             p.drawLine(int(x), 18, int(x), 28)
             p.drawText(int(x + 2), 15, f"{t:.0f}s")
             t += major
@@ -192,7 +219,7 @@ class BasicTimelineWidget(QWidget):
             p.setPen(Qt.white); p.drawText(rect.adjusted(5, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, label[:36])
 
         # playhead
-        x = self.HEADER_WIDTH + self.playhead * self.zoom
+        x = self.time_to_x(self.playhead)
         p.setPen(QPen(QColor(colors["playhead"]), 2))
         p.drawLine(int(x), 20, int(x), self.height() - 6)
         p.setBrush(QColor(colors["playhead"]))
