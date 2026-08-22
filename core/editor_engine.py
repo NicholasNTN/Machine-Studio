@@ -12,7 +12,7 @@ import time
 from . import ffmpeg_engine as ffm
 from editor.video_transform import VideoTransform
 from editor.text_style import TextStyle
-from editor.canvas import CanvasBackground
+from editor.canvas import CanvasBackground, calculate_video_layout
 
 
 class EditorError(RuntimeError):
@@ -238,11 +238,16 @@ def render_timeline(
         dur = max(0.05, end - start)
 
         transform = VideoTransform.from_dict(clip.get("transform", {}))
-        base_mode = "increase" if transform.fit_mode == "fill" else "decrease"
-        sx = max(0.01, transform.scale_x / 100.0); sy = max(0.01, transform.scale_y / 100.0)
-        x = f"({out_w}-overlay_w)*{transform.position_x / 100.0:.6f}"
-        y = f"({out_h}-overlay_h)*{transform.position_y / 100.0:.6f}"
-        transform_filters = [f"scale={out_w}:{out_h}:force_original_aspect_ratio={base_mode}", f"scale=trunc(iw*{sx}/2)*2:trunc(ih*{sy}/2)*2"]
+        layout = calculate_video_layout(info.get("width") or out_w, info.get("height") or out_h,
+                                        out_w, out_h, transform.to_dict())
+        layout_w = _safe_even(layout.width); layout_h = _safe_even(layout.height)
+        if abs(transform.rotation) > 0.001:
+            x = f"({out_w}-overlay_w)*{transform.position_x / 100.0:.6f}"
+            y = f"({out_h}-overlay_h)*{transform.position_y / 100.0:.6f}"
+        else:
+            x = f"({out_w}-{layout_w})*{transform.position_x / 100.0:.6f}"
+            y = f"({out_h}-{layout_h})*{transform.position_y / 100.0:.6f}"
+        transform_filters = [f"scale={layout_w}:{layout_h}"]
         if transform.flip_horizontal: transform_filters.append("hflip")
         if transform.flip_vertical: transform_filters.append("vflip")
         if abs(transform.rotation) > 0.001: transform_filters.append(f"rotate={transform.rotation}*PI/180:ow=rotw(iw):oh=roth(ih):c=none")

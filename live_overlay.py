@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from core.subtitle_sizing import preview_font_pixels
-from editor.canvas import calculate_media_rect
+from editor.canvas import calculate_media_rect, calculate_video_layout
 from editor.blur_zone import BlurZone, source_zone_canvas_rect
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
@@ -355,12 +355,13 @@ class InteractivePreviewOverlay(QWidget):
         canvas = self.video_rect()
         if self._frame_image.isNull():
             return canvas
-        rect = calculate_media_rect(self._frame_image.width(), self._frame_image.height(), self.output_width, self.output_height, self.video_fit_mode)
-        sx = max(0.01, float(self.video_transform.get("scale_x", 100)) / 100.0); sy = max(0.01, float(self.video_transform.get("scale_y", 100)) / 100.0)
-        width = canvas.width() * rect.width / self.output_width * sx; height = canvas.height() * rect.height / self.output_height * sy
-        cx = canvas.left() + (canvas.width() - width) * float(self.video_transform.get("position_x", 50)) / 100.0 + width / 2.0
-        cy = canvas.top() + (canvas.height() - height) * float(self.video_transform.get("position_y", 50)) / 100.0 + height / 2.0
-        return QRectF(cx - width / 2, cy - height / 2, width, height)
+        layout = calculate_video_layout(
+            self._frame_image.width(), self._frame_image.height(),
+            self.output_width, self.output_height, self.video_transform,
+        )
+        sx, sy = canvas.width() / self.output_width, canvas.height() / self.output_height
+        return QRectF(canvas.left() + layout.x * sx, canvas.top() + layout.y * sy,
+                      layout.width * sx, layout.height * sy)
 
     def pct_rect(self, zone: dict) -> QRectF:
         canvas = self.video_rect()

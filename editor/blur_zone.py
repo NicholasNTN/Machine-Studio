@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from math import cos, radians, sin
 from uuid import uuid4
 
-from editor.canvas import CanvasRect, calculate_media_rect
+from editor.canvas import CanvasRect, calculate_video_layout
 
 
 @dataclass(frozen=True)
@@ -75,11 +75,8 @@ def source_zone_canvas_rect(zone, source_width, source_height, canvas_width, can
     """Map a source-normalized zone through Fit/Fill and VideoTransform."""
     z = zone if isinstance(zone, BlurZone) else BlurZone.from_dict(zone)
     t = dict(transform or {})
-    media = calculate_media_rect(source_width, source_height, canvas_width, canvas_height, t.get("fit_mode", "fit"))
-    sx = max(.01, float(t.get("scale_x", 100)) / 100); sy = max(.01, float(t.get("scale_y", 100)) / 100)
-    width, height = media.width * sx, media.height * sy
-    left = (canvas_width - width) * float(t.get("position_x", 50)) / 100
-    top = (canvas_height - height) * float(t.get("position_y", 50)) / 100
+    video = calculate_video_layout(source_width, source_height, canvas_width, canvas_height, t)
+    left, top, width, height = video.x, video.y, video.width, video.height
     zx = 1 - z.x - z.width if t.get("flip_horizontal") else z.x
     zy = 1 - z.y - z.height if t.get("flip_vertical") else z.y
     points = [(left + width*zx, top + height*zy), (left + width*(zx+z.width), top + height*zy),

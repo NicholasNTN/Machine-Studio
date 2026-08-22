@@ -8,6 +8,7 @@ import re
 from core.models import ExportOptions, SubtitleStyle
 from editor.blur_zone import normalize_blur_zones
 from editor.canvas import CanvasBackground
+from editor.canvas import output_canvas_size
 from editor.sequence_manager import SequenceDocument
 from editor.video_transform import VideoTransform
 
@@ -38,9 +39,11 @@ def snapshot_resolution(output: dict) -> str:
     resolution = _text(output.get("resolution"), "Original")
     aspect_text = _text(output.get("aspect_ratio"), "Original")
     dimensions = output.get("canvas_dimensions")
-    if resolution == "Original" and aspect_text != "Original" and isinstance(dimensions, (list, tuple)) and len(dimensions) == 2:
-        width = int(_number(dimensions[0], 0, 2)); height = int(_number(dimensions[1], 0, 2))
-        width -= width % 2; height -= height % 2
+    if isinstance(dimensions, (list, tuple)) and len(dimensions) == 2:
+        canvas_width = int(_number(dimensions[0], 0, 2)); canvas_height = int(_number(dimensions[1], 0, 2))
+        match = re.search(r"(\d+)\s*x\s*(\d+)", resolution, re.I)
+        requested = (int(match.group(1)), int(match.group(2))) if match else (None, None)
+        width, height = output_canvas_size(canvas_width, canvas_height, *requested)
         return f"{width}x{height}"
     if aspect_text == "Original" or ":" not in aspect_text:
         return resolution

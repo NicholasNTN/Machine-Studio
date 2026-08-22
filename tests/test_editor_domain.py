@@ -13,7 +13,7 @@ from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.timeline_state import TimelineState
 from editor.track import Track, TrackKind
 from editor.subtitle_group import SubtitleGroup, SubtitleGroupStyle, subtitle_group_is_visible, active_subtitle_render_state
-from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect
+from editor.canvas import CanvasBackground, calculate_fill_rect, calculate_fit_rect, calculate_video_layout, output_canvas_size
 from editor.blur_zone import BlurZone, source_zone_canvas_rect, resize_normalized_zone
 from editor.video_transform import VideoTransform
 from core.downloader import safe_output_filename
@@ -188,6 +188,21 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(snapshot_resolution({"resolution": "1080x1920", "aspect_ratio": "16:9"}), "1920x1080")
         self.assertEqual(snapshot_resolution({"resolution": "Original", "aspect_ratio": "9:16"}), "Original")
         self.assertEqual(snapshot_resolution({"resolution": "Original", "aspect_ratio": "9:16", "canvas_dimensions": [1080, 1920]}), "1080x1920")
+        self.assertEqual(snapshot_resolution({"resolution": "1080x1920", "aspect_ratio": "Original", "canvas_dimensions": [1280, 720]}), "1920x1080")
+
+    def test_preview_and_export_share_canonical_video_layout(self):
+        cases = (
+            (1080, 1920, 1920, 1080),
+            (720, 960, 1080, 1920),
+            (1920, 1080, 1080, 1920),
+        )
+        transform = {"fit_mode": "fit", "position_x": 50, "position_y": 50}
+        for sw, sh, cw, ch in cases:
+            preview = calculate_video_layout(sw, sh, cw, ch, transform)
+            export = calculate_video_layout(sw, sh, *output_canvas_size(cw, ch), transform)
+            self.assertEqual(preview, export)
+            self.assertAlmostEqual(preview.x + preview.width / 2, cw / 2)
+            self.assertAlmostEqual(preview.y + preview.height / 2, ch / 2)
 
     def test_timeline_renderer_emits_all_canvas_background_modes(self):
         with tempfile.TemporaryDirectory() as folder:

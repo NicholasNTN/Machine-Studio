@@ -13,6 +13,7 @@ import datetime
 from .models import Scene, ExportOptions
 from . import subtitle_engine
 from editor.blur_zone import source_zone_canvas_rect
+from editor.canvas import calculate_video_layout
 
 
 class FFmpegError(RuntimeError):
@@ -684,10 +685,10 @@ def export_video(
 
     if target:
         w, h = target
-        transform_fit = str(transform.get("fit_mode", options.fit_mode)).lower()
-        fit_rule = "increase" if transform_fit == "fill" else "decrease"
-        sx = max(0.01, float(transform.get("scale_x", 100)) / 100.0); sy = max(0.01, float(transform.get("scale_y", 100)) / 100.0)
-        foreground = [f"scale={w}:{h}:force_original_aspect_ratio={fit_rule}", f"scale=trunc(iw*{sx}/2)*2:trunc(ih*{sy}/2)*2"]
+        layout = calculate_video_layout(info.get("width") or w, info.get("height") or h, w, h, transform)
+        layout_w = max(2, int(round(layout.width))); layout_w -= layout_w % 2
+        layout_h = max(2, int(round(layout.height))); layout_h -= layout_h % 2
+        foreground = [f"scale={layout_w}:{layout_h}", "setsar=1"]
         if transform.get("flip_horizontal"): foreground.append("hflip")
         if transform.get("flip_vertical"): foreground.append("vflip")
         rotation = float(transform.get("rotation", 0) or 0)
