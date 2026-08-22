@@ -101,6 +101,19 @@ def application_stylesheet() -> str:
     QMenu {{ background:{c['surfaceRaised']}; border:1px solid {c['borderStrong']}; padding:5px; }} QMenu::item {{ padding:6px 24px 6px 10px; border-radius:4px; }} QMenu::item:selected {{ background:{c['surfaceSelected']}; }}
     QFrame#machineToast {{ background:{c['surfaceElevated']}; border:1px solid {c['borderStrong']}; border-left:3px solid {c['success']}; border-radius:{r['card']}px; }}
     QStatusBar {{ min-height:22px; max-height:22px; background:{c['surface']}; color:{c['textMuted']}; border-top:1px solid {c['border']}; }}
+    QMainWindow#projectHub {{ background:{c['background']}; }}
+    QLabel#hubBrand {{ color:{c['textPrimary']}; font-size:13px; font-weight:700; }}
+    QLabel#hubTitle {{ color:{c['textPrimary']}; font-size:24px; font-weight:700; }}
+    QLabel#hubSubtitle {{ color:{c['textMuted']}; font-size:11px; }}
+    QLabel#hubSectionTitle {{ color:{c['textPrimary']}; font-size:14px; font-weight:650; }}
+    QPushButton#projectHero {{ background:{c['accent']}; color:#FFFFFF; border:1px solid #5A98FF; border-radius:{r['large']}px; font-size:14px; font-weight:700; text-align:left; padding-left:20px; }}
+    QPushButton#projectHero:hover {{ background:{c['accentHover']}; }} QPushButton#projectHero:pressed {{ background:{c['accentPressed']}; }}
+    QFrame#projectCard {{ background:{c['surfaceRaised']}; border:1px solid {c['border']}; border-radius:{r['card']}px; }}
+    QFrame#projectCard:hover {{ background:{c['surfaceHover']}; border-color:{c['borderStrong']}; }}
+    QFrame#projectCard[selected="true"] {{ background:{c['surfaceSelected']}; border:1px solid {c['accent']}; }}
+    QLabel#projectThumbnail {{ background:{c['preview']}; border-radius:{r['medium']}px; color:{c['textMuted']}; }}
+    QLabel#projectName {{ color:{c['textPrimary']}; font-size:12px; font-weight:650; }}
+    QLabel#projectMeta {{ color:{c['textMuted']}; font-size:9px; }}
     """
 
 
