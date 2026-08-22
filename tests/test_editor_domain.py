@@ -40,6 +40,19 @@ from core.models import AIProject
 
 
 class EditorDomainTests(unittest.TestCase):
+    def test_ui_design_tokens_are_semantic_and_web_portable(self):
+        values = json.loads(Path("design/tokens.json").read_text(encoding="utf-8"))
+        self.assertTrue({"color", "spacing", "radius", "typography", "motion", "control"} <= values.keys())
+        self.assertTrue({"background", "surface", "surfaceRaised", "textPrimary", "accent", "danger"} <= values["color"].keys())
+        self.assertFalse(any(key.startswith("Q") for group in values.values() for key in group))
+
+    def test_main_window_static_theme_is_centralized(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+        style_method = next(node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef) and node.name == "_style")
+        calls = [node for node in ast.walk(style_method) if isinstance(node, ast.Call)]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(getattr(calls[0].func, "id", ""), "apply_theme")
+
     def test_all_export_option_callers_pass_explicit_snapshot(self):
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
         methods = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
