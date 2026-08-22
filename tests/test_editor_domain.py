@@ -34,6 +34,7 @@ from editor.blur_zone import normalize_blur_zones
 from editor.layer_order import CANONICAL_LAYER_ORDER
 from editor.preview_binding import PreviewBinding, binding_after_clip_change
 from editor.sequence_manager import SequenceManager
+from editor.timeline_view import compute_auto_timeline_view
 from core.ai_styles import AI_STYLES, grouped_styles
 from core.speaker_role_service import analyze_speaker_roles
 from core.models import AIProject
@@ -57,6 +58,21 @@ class EditorDomainTests(unittest.TestCase):
         from ui.icons import REQUIRED_ICONS, icon_path
         missing = [name for name in REQUIRED_ICONS if not icon_path(name).is_file()]
         self.assertEqual(missing, [])
+
+    def test_responsive_timeline_view_scales_with_viewport_and_fits_content(self):
+        cases = ((800, 20), (1200, 60), (1800, 80), (2400, 80))
+        views = [compute_auto_timeline_view(width, duration) for width, duration in cases]
+        for view, (_, duration) in zip(views, cases):
+            self.assertGreaterEqual(view.visible_duration, duration + max(5, duration * 0.05))
+            self.assertIn(view.major_tick_interval, (0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300))
+            self.assertGreater(view.pixels_per_second, 0)
+        self.assertGreater(views[3].visible_duration, views[2].visible_duration)
+
+    def test_second_clip_fits_inside_responsive_timeline_range(self):
+        view = compute_auto_timeline_view(1400, 60 + 25)
+        last_clip_right = 132 + 85 * view.pixels_per_second
+        rendered_width = 132 + view.visible_duration * view.pixels_per_second
+        self.assertLess(last_clip_right, rendered_width)
 
     def test_all_export_option_callers_pass_explicit_snapshot(self):
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))

@@ -24,6 +24,10 @@ def main():
     window.sequence_manager.create("Interview"); window.sequence_manager.create("Social Cut")
     window.refresh_sequence_tabs(); window.settings_panel.set_page("video_clip")
     window.context_inspector.stack.setCurrentWidget(window.context_inspector.pages["video"])
+    window.editor_timeline.set_clips([
+        {"name": "Factory A", "source_start": 0.0, "source_end": 60.0, "source_duration": 60.0, "enabled": True},
+        {"name": "Factory B", "source_start": 0.0, "source_end": 25.0, "source_duration": 25.0, "enabled": True},
+    ])
     output = Path(tempfile.gettempdir()) / "machine_studio_ui_previews"; output.mkdir(parents=True, exist_ok=True)
     for width, height in ((1920, 1080), (1600, 900), (1366, 768)):
         window.resize(width, height); window.show(); qt.processEvents()
