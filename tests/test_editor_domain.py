@@ -53,6 +53,11 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(getattr(calls[0].func, "id", ""), "apply_theme")
 
+    def test_required_bundled_svg_icons_exist(self):
+        from ui.icons import REQUIRED_ICONS, icon_path
+        missing = [name for name in REQUIRED_ICONS if not icon_path(name).is_file()]
+        self.assertEqual(missing, [])
+
     def test_all_export_option_callers_pass_explicit_snapshot(self):
         tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
         methods = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]

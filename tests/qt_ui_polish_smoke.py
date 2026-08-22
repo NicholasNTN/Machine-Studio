@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 import app as app_module
 from ui.export_dialog import ExportDialog
+from ui.icons import REQUIRED_ICONS, icon, icon_path
 from ui.media_panel import MediaCard
 
 
@@ -22,6 +23,9 @@ def main():
     app_module.MainWindow.schedule_autosave = lambda self, *args: None
     qt = QApplication.instance() or QApplication([])
     window = app_module.MainWindow(); window.show()
+    for name in REQUIRED_ICONS:
+        assert icon_path(name).is_file(), f"missing SVG: {name}"
+        assert not icon(name).isNull(), f"null QIcon: {name}"
 
     for section in ("ai", "download", "settings", "editor"):
         window._open_top_section(section)
