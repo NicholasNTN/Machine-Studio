@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
+from .icons import icon
+from .widgets import MachineButton, MachineNavButton
 
 
 class TopBar(QFrame):
@@ -9,38 +11,37 @@ class TopBar(QFrame):
     exportRequested = Signal()
 
     SECTIONS = (
-        ("editor", "Video Editor"),
-        ("ai", "AI Studio"),
-        ("download", "Download"),
-        ("settings", "Settings"),
+        ("editor", "editor", "Video Editor"),
+        ("ai", "ai", "AI Studio"),
+        ("download", "download", "Download"),
+        ("settings", "settings", "Settings"),
     )
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("topBar")
-        self.setFixedHeight(42)
+        self.setFixedHeight(46)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 3, 8, 3)
         layout.setSpacing(3)
 
-        brand = QLabel("MACHINE STUDIO")
+        brand_mark = QLabel(); brand_mark.setObjectName("brandMark"); brand_mark.setPixmap(icon("brand", "accent").pixmap(19, 19)); layout.addWidget(brand_mark)
+        brand = QLabel("Machine Studio")
         brand.setObjectName("brandLabel")
         layout.addWidget(brand)
         self.buttons = {}
-        for key, label in self.SECTIONS:
-            button = QPushButton(label)
-            button.setObjectName("navButton")
-            button.setCheckable(key != "menu")
+        for key, icon_name, label in self.SECTIONS:
+            button = MachineNavButton(label, icon_name)
             button.setFixedHeight(30)
             button.clicked.connect(lambda checked=False, value=key: self.sectionRequested.emit(value))
             self.buttons[key] = button
             layout.addWidget(button)
         layout.addStretch(1)
 
-        self.project_status = QLabel("Project ready  •  Autosave on")
+        self.project_status = QLabel("Project ready  ·  Autosave on")
         self.project_status.setObjectName("projectStatus")
         layout.addWidget(self.project_status)
-        export = QPushButton("Export")
+        export = MachineButton("Export", variant="primary", icon_name="export")
         export.setObjectName("topExport")
         export.clicked.connect(self.exportRequested)
         layout.addWidget(export)

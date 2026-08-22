@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QFont
 from PySide6.QtWidgets import QWidget
+from ui.theme import tokens
 
 from core import editor_engine
 
@@ -127,15 +128,16 @@ class BasicTimelineWidget(QWidget):
         fg = palette.windowText().color()
         p.fillRect(self.rect(), bg)
 
+        colors = tokens()["color"]
         # Professional fixed-order track lanes and compact headers.
         for index, (key, label) in enumerate(self.TRACKS):
             top = 34 + index * 40
-            p.fillRect(QRectF(0, top, self.width(), 39), QColor(15, 26, 42) if index % 2 == 0 else QColor(18, 31, 50))
-            p.setPen(QColor(108, 132, 164)); p.drawLine(0, top + 39, self.width(), top + 39)
-            p.setPen(QColor(210, 222, 238)); p.drawText(QRectF(8, top, 72, 39), Qt.AlignVCenter | Qt.AlignLeft, label)
+            p.fillRect(QRectF(0, top, self.width(), 39), QColor(colors["surface"]) if index % 2 == 0 else QColor(colors["surfaceRaised"]))
+            p.setPen(QColor(colors["border"])); p.drawLine(0, top + 39, self.width(), top + 39)
+            p.setPen(QColor(colors["textSecondary"])); p.drawText(QRectF(8, top, 72, 39), Qt.AlignVCenter | Qt.AlignLeft, label)
             track = next((track for track in self.tracks if getattr(getattr(track, "kind", ""), "value", "") == key), None)
-            states = ("🔒" if track and track.locked else "🔓", "👁" if not track or track.visible else "○", "🔇" if track and track.muted else "🔊")
-            p.setPen(QColor(128, 151, 181))
+            states = ("L" if track and track.locked else "", "V" if not track or track.visible else "", "M" if track and track.muted else "")
+            p.setPen(QColor(colors["textMuted"]))
             for state_index, state in enumerate(states):
                 p.drawText(QRectF(84 + state_index * 15, top, 15, 39), Qt.AlignCenter, state)
 
@@ -153,10 +155,10 @@ class BasicTimelineWidget(QWidget):
         rects = self._clip_rects()
         for i, (clip, rect) in enumerate(zip(self.clips, rects)):
             selected = i == self.selected_index
-            base = QColor(46, 112, 188) if not selected else QColor(53, 170, 110)
+            base = QColor(colors["accent"]) if not selected else QColor(colors["success"])
             if not clip.get("enabled", True):
                 base = QColor(90, 90, 90)
-            p.setPen(QPen(QColor(210, 220, 235), 2 if selected else 1))
+            p.setPen(QPen(QColor(colors["textPrimary"]), 2 if selected else 1))
             p.setBrush(base)
             p.drawRoundedRect(rect, 5, 5)
 
@@ -179,21 +181,21 @@ class BasicTimelineWidget(QWidget):
             )
 
             # trim handles
-            p.fillRect(self._handle_rect(rect, True), QColor(255, 211, 70))
-            p.fillRect(self._handle_rect(rect, False), QColor(255, 211, 70))
+            p.fillRect(self._handle_rect(rect, True), QColor(colors["warning"]))
+            p.fillRect(self._handle_rect(rect, False), QColor(colors["warning"]))
 
-        colors = {"text": QColor(124, 87, 214), "subtitle": QColor(24, 168, 178), "effect": QColor(194, 104, 43), "audio": QColor(39, 143, 95)}
+        lane_colors = {"text": QColor(colors["timelineText"]), "subtitle": QColor(colors["timelineSubtitle"]), "effect": QColor(colors["timelineEffect"]), "audio": QColor(colors["timelineAudio"])}
         for item, rect, lane in self._item_rects():
             selected = str(getattr(item, "id", "")) == self.selected_item_id
-            p.setPen(QPen(QColor(107, 181, 255) if selected else QColor(214, 225, 239), 3 if selected else 1)); p.setBrush(colors.get(lane, QColor(86, 105, 132))); p.drawRoundedRect(rect, 4, 4)
+            p.setPen(QPen(QColor(colors["accentHover"]) if selected else QColor(colors["textSecondary"]), 3 if selected else 1)); p.setBrush(lane_colors.get(lane, QColor(colors["textMuted"]))); p.drawRoundedRect(rect, 4, 4)
             label = str(getattr(item, "metadata", {}).get("text") or getattr(item, "metadata", {}).get("name") or getattr(getattr(item, "kind", "item"), "value", "item"))
             p.setPen(Qt.white); p.drawText(rect.adjusted(5, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, label[:36])
 
         # playhead
         x = self.HEADER_WIDTH + self.playhead * self.zoom
-        p.setPen(QPen(QColor(255, 70, 70), 2))
+        p.setPen(QPen(QColor(colors["playhead"]), 2))
         p.drawLine(int(x), 20, int(x), self.height() - 6)
-        p.setBrush(QColor(255, 70, 70))
+        p.setBrush(QColor(colors["playhead"]))
         p.drawPolygon([
             QPointF(x - 6, 20),
             QPointF(x + 6, 20),

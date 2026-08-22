@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
+from .icons import icon
 
 
 class SequenceTabButton(QWidget):
@@ -27,7 +28,7 @@ class SequenceTabButton(QWidget):
         row.addWidget(self.name_label)
         self.close_button = QToolButton(self)
         self.close_button.setObjectName("sequenceTabClose")
-        self.close_button.setText("×")
+        self.close_button.setIcon(icon("close"))
         self.close_button.setToolTip(f"Close {name}")
         self.close_button.setAutoRaise(True)
         self.close_button.setFixedSize(18, 18)
@@ -74,7 +75,7 @@ class SequenceTabStrip(QWidget):
         self._layout.setSpacing(2)
         self.plus_button = QToolButton(self)
         self.plus_button.setObjectName("sequenceTabPlus")
-        self.plus_button.setText("+")
+        self.plus_button.setIcon(icon("plus"))
         self.plus_button.setToolTip("New Timeline")
         self.plus_button.setAutoRaise(True)
         self.plus_button.setFixedSize(24, 24)
@@ -101,7 +102,7 @@ class SequenceTabStrip(QWidget):
             self._layout.addWidget(button)
         self.plus_button = QToolButton(self)
         self.plus_button.setObjectName("sequenceTabPlus")
-        self.plus_button.setText("+")
+        self.plus_button.setIcon(icon("plus"))
         self.plus_button.setToolTip("New Timeline")
         self.plus_button.setAutoRaise(True)
         self.plus_button.setFixedSize(24, 24)

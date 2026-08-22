@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QSplitter, QStackedWidget, QVBoxLayout, QWidget
+from .widgets import MachineToolButton
 
 from core.last_used_preferences import sanitize_workspace_splitter_sizes
 
@@ -7,7 +8,7 @@ from core.last_used_preferences import sanitize_workspace_splitter_sizes
 class EditorWorkspace(QWidget):
     splitterSizesChanged = Signal()
     toolSelected = Signal(str)
-    TOOLS = (("media", "▣", "Media"), ("voice", "♫", "Voice"), ("subtitle", "CC", "Phụ đề"), ("text", "T", "Text"), ("blur", "◉", "Blur"), ("customize", "◆", "Tùy chỉnh"), ("advanced", "⚙", "Nâng cao"))
+    TOOLS = (("media", "media", "Media"), ("voice", "voice", "Voice"), ("subtitle", "subtitle", "Phụ đề"), ("text", "text", "Text"), ("blur", "blur", "Blur"), ("customize", "customize", "Tùy chỉnh"), ("advanced", "advanced", "Nâng cao"))
 
     def __init__(self, pages, preview, inspector, timeline, parent=None):
         super().__init__(parent); root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0)
@@ -20,8 +21,8 @@ class EditorWorkspace(QWidget):
         self._tool_buttons = {}
         for page in pages.values(): self.page_stack.addWidget(page)
         group = QButtonGroup(self); group.setExclusive(True)
-        for index, (key, icon, label) in enumerate(self.TOOLS):
-            button = QPushButton(f"{icon}\n{label}"); button.setObjectName("toolButton"); button.setToolTip(label); button.setCheckable(True); button.setFixedSize(56, 52); button.clicked.connect(lambda checked=False, i=index, k=key: (self.page_stack.setCurrentIndex(i), self.toolSelected.emit(k))); group.addButton(button); nav_layout.addWidget(button)
+        for index, (key, icon_name, label) in enumerate(self.TOOLS):
+            button = MachineToolButton(label, icon_name); button.setFixedSize(56, 52); button.clicked.connect(lambda checked=False, i=index, k=key: (self.page_stack.setCurrentIndex(i), self.toolSelected.emit(k))); group.addButton(button); nav_layout.addWidget(button)
             self._tool_buttons[key] = button
             if index == 0: button.setChecked(True)
         nav_layout.addStretch(1); left_layout.addWidget(nav); left_layout.addWidget(self.page_stack, 1)

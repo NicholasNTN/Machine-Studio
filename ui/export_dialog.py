@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from .icons import icon
 
 
 def sanitize_windows_name(value: str) -> str:
@@ -16,14 +17,15 @@ def sanitize_windows_name(value: str) -> str:
 class ExportDialog(QDialog):
     """Review-only export surface; rendering starts only after acceptance."""
     def __init__(self, preview: QPixmap, sources, output_dir, resolution, codec, encoder, strip_metadata=True, parent=None):
-        super().__init__(parent); self.setWindowTitle("Export — Machine Studio"); self.resize(1120, 720); self.setModal(True)
+        super().__init__(parent); self.setObjectName("exportDialog"); self.setWindowTitle("Export Video — Machine Studio"); self.resize(1120, 720); self.setModal(True)
         root = QHBoxLayout(self)
-        left = QVBoxLayout(); title = QLabel("Final Preview"); title.setObjectName("panelTitle"); left.addWidget(title)
-        self.preview = QLabel(); self.preview.setAlignment(Qt.AlignCenter); self.preview.setMinimumSize(480, 360); self.preview.setStyleSheet("background:#05080d;border:1px solid #34465f;border-radius:10px;")
+        left = QVBoxLayout(); title = QLabel("Export Video"); title.setObjectName("panelTitle"); left.addWidget(title)
+        preview_hint = QLabel("Final frame preview"); preview_hint.setObjectName("hint"); left.addWidget(preview_hint)
+        self.preview = QLabel(); self.preview.setObjectName("exportPreview"); self.preview.setAlignment(Qt.AlignCenter); self.preview.setMinimumSize(480, 360)
         if not preview.isNull(): self.preview.setPixmap(preview.scaled(540, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         left.addWidget(self.preview, 1); root.addLayout(left, 1)
-        right = QVBoxLayout(); form = QFormLayout(); self.name = QLineEdit("Machine_Export"); form.addRow("Name", self.name)
-        out_row = QHBoxLayout(); self.output_dir = QLineEdit(str(output_dir)); browse = QPushButton("Browse"); browse.clicked.connect(self._browse); out_row.addWidget(self.output_dir, 1); out_row.addWidget(browse); form.addRow("Export To", out_row); right.addLayout(form)
+        right = QVBoxLayout(); form = QFormLayout(); self.name = QLineEdit("Machine_Export"); form.addRow("Output filename", self.name)
+        out_row = QHBoxLayout(); self.output_dir = QLineEdit(str(output_dir)); browse = QPushButton("Browse"); browse.setIcon(icon("folder")); browse.clicked.connect(self._browse); out_row.addWidget(self.output_dir, 1); out_row.addWidget(browse); form.addRow("Destination", out_row); right.addLayout(form)
         self.tabs = QTabWidget(); right.addWidget(self.tabs, 1)
         video = QWidget(); vf = QFormLayout(video); self.resolution = QComboBox(); self.resolution.addItems(["720x1280 (HD - Nhanh)", "1080x1920 (Full HD)", "1080x1920 (Full HD 60FPS)", "1440x2560 (2K)", "2160x3840 (4K)", "1080x1440 (3:4)", "1920x1080 (YouTube)", "Original"]); self.resolution.setCurrentText(resolution)
         self.codec = QComboBox(); self.codec.addItems(["Auto", "H.264", "H.265", "AV1"]); self.codec.setCurrentText(codec)
@@ -38,7 +40,7 @@ class ExportDialog(QDialog):
         if parent is not None and hasattr(parent, "open_capcut"): open_capcut.clicked.connect(parent.open_capcut)
         cl.addWidget(package); cl.addWidget(open_capcut); cl.addStretch(1); self.tabs.addTab(capcut, "CapCut")
         self.summary = QLabel("Duration and estimated size are calculated by the existing render pipeline."); self.summary.setObjectName("hint"); right.addWidget(self.summary)
-        buttons = QDialogButtonBox(QDialogButtonBox.Cancel); export = buttons.addButton("Export", QDialogButtonBox.AcceptRole); export.setObjectName("success"); buttons.rejected.connect(self.reject); buttons.accepted.connect(self._accept_clean); right.addWidget(buttons); root.addLayout(right, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel); export = buttons.addButton("Export Video", QDialogButtonBox.AcceptRole); export.setObjectName("topExport"); export.setIcon(icon("export", "textPrimary")); buttons.rejected.connect(self.reject); buttons.accepted.connect(self._accept_clean); right.addWidget(buttons); root.addLayout(right, 1)
 
     def _browse(self):
         path = QFileDialog.getExistingDirectory(self, "Export To", self.output_dir.text())

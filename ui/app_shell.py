@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from .top_bar import TopBar
+from .widgets import MachineToast
 
 
 class AppShell(QWidget):
@@ -17,3 +18,13 @@ class AppShell(QWidget):
         self.top_bar = TopBar(self)
         layout.addWidget(self.top_bar)
         layout.addWidget(content, 1)
+        self.toast = MachineToast(self)
+
+    def show_toast(self, message, timeout=3000):
+        self.toast.showMessage(message, timeout)
+        self.toast.move(max(12, self.width() - self.toast.width() - 20), 58)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.toast.isVisible():
+            self.toast.move(max(12, self.width() - self.toast.width() - 20), 58)

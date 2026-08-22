@@ -3,10 +3,12 @@ from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QStackedWidget, QVBox
 
 class SettingsPanel(QFrame):
     """Tool-driven settings surface containing the existing working controls."""
+    TITLES = {"media": ("Media", "Clip and library details"), "voice": ("Voice", "Narration and audio preview"), "subtitle": ("Phụ đề", "Subtitle content and appearance"), "text": ("Text", "Manual text layer properties"), "blur": ("Blur", "Detection and blur zones"), "customize": ("Tùy chỉnh", "Logo, speed, and canvas"), "advanced": ("Nâng cao", "Background and overlay controls"), "video_clip": ("Video", "Selected clip properties")}
     def __init__(self, pages, parent=None):
         super().__init__(parent); self.setObjectName("inspectorPanel"); self.setMinimumWidth(340)
         layout = QVBoxLayout(self); layout.setContentsMargins(10, 10, 10, 10)
-        title = QLabel("Settings"); title.setObjectName("panelTitle"); layout.addWidget(title)
+        self.title = QLabel("Media"); self.title.setObjectName("panelTitle"); layout.addWidget(self.title)
+        self.description = QLabel("Clip and library details"); self.description.setObjectName("panelDescription"); self.description.setWordWrap(True); layout.addWidget(self.description)
         self.stack = QStackedWidget(); self._indexes = {}
         for key, content in pages.items():
             scroll = QScrollArea(); scroll.setWidgetResizable(True); holder = QWidget(); body = QVBoxLayout(holder); body.setContentsMargins(4, 4, 4, 4); body.addWidget(content); body.addStretch(1); scroll.setWidget(holder)
@@ -15,7 +17,9 @@ class SettingsPanel(QFrame):
 
     def set_page(self, key):
         if key not in self._indexes: return False
-        self.stack.setCurrentIndex(self._indexes[key]); return True
+        self.stack.setCurrentIndex(self._indexes[key])
+        title, description = self.TITLES.get(key, (key.replace("_", " ").title(), ""))
+        self.title.setText(title); self.description.setText(description); return True
 
     def has_page(self, key): return key in self._indexes
     def current_page(self):
