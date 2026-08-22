@@ -54,6 +54,8 @@ from ui.export_dialog import ExportDialog, sanitize_windows_name
 from ui.task_progress import TaskProgress
 from ui.sequence_tab_strip import SequenceTabStrip
 from ui.theme import apply_theme
+from ui.icons import icon
+from ui.widgets import MachineButton, MachineIconButton, MachineToolbar, MachineToolbarGroup
 from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
 from services.playback_controller import PlaybackController, narration_status_action
@@ -1435,7 +1437,7 @@ class MainWindow(QMainWindow):
         cl = QVBoxLayout(center)
         cl.setContentsMargins(3, 3, 3, 3)
 
-        phead = QHBoxLayout()
+        preview_toolbar = MachineToolbar(); phead = preview_toolbar.layout
         self.left_panel_btn = QPushButton("☰ Cài đặt")
         self.left_panel_btn.setCheckable(True)
         self.left_panel_btn.setChecked(True)
@@ -1450,48 +1452,38 @@ class MainWindow(QMainWindow):
         self.right_panel_btn.toggled.connect(
             lambda checked: self.toggle_export_side_panel("right", checked)
         )
-        phead.addWidget(self.left_panel_btn)
-        phead.addWidget(QLabel("Preview"))
-        phead.addWidget(QLabel("Canvas"))
+        canvas_group = MachineToolbarGroup("Canvas"); phead.addWidget(canvas_group)
         self.preview_ratio_combo = QComboBox()
         self.preview_ratio_combo.addItems(["Original", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "2:1", "5:4", "4:5"])
         self.preview_ratio_combo.currentTextChanged.connect(self.set_project_aspect_ratio)
-        phead.addWidget(self.preview_ratio_combo)
+        self.preview_ratio_combo.setMaximumWidth(92); canvas_group.layout.addWidget(self.preview_ratio_combo)
 
         phead.addSpacing(10)
-        zoom_out = QPushButton("−")
-        zoom_out.setMaximumWidth(34)
-        zoom_out.setToolTip("Zoom Out Preview")
+        zoom_group = MachineToolbarGroup(); zoom_out = MachineIconButton("zoom_out", "Zoom Out Preview")
         zoom_out.clicked.connect(lambda: self.change_preview_zoom(-10))
         self.preview_zoom_label = QLabel("100%")
         self.preview_zoom_label.setMinimumWidth(46)
         self.preview_zoom_label.setAlignment(Qt.AlignCenter)
-        zoom_in = QPushButton("+")
-        zoom_in.setMaximumWidth(34)
-        zoom_in.setToolTip("Zoom In Preview")
+        zoom_in = MachineIconButton("zoom_in", "Zoom In Preview")
         zoom_in.clicked.connect(lambda: self.change_preview_zoom(10))
-        zoom_fit = QPushButton("Fit")
-        zoom_fit.setMaximumWidth(46)
+        zoom_fit = MachineIconButton("reset", "Reset Preview Zoom")
         zoom_fit.setToolTip(
             "Fit Preview về 100%. Khi zoom > 100%, giữ chuột giữa để pan."
         )
         zoom_fit.clicked.connect(self.reset_preview_zoom)
-        phead.addWidget(zoom_out)
-        phead.addWidget(self.preview_zoom_label)
-        phead.addWidget(zoom_in)
-        phead.addWidget(zoom_fit)
+        zoom_group.layout.addWidget(zoom_out); zoom_group.layout.addWidget(self.preview_zoom_label); zoom_group.layout.addWidget(zoom_in)
         self.preview_zoom_combo = QComboBox()
         self.preview_zoom_combo.addItems(["Fit", "Fill", "50%", "75%", "100%", "125%", "150%", "200%", "300%"])
         self.preview_zoom_combo.setCurrentText("100%")
         self.preview_zoom_combo.currentTextChanged.connect(self._preview_zoom_mode_changed)
-        phead.addWidget(self.preview_zoom_combo)
+        self.preview_zoom_combo.setMaximumWidth(82); zoom_group.layout.addWidget(self.preview_zoom_combo); zoom_group.layout.addWidget(zoom_fit); phead.addWidget(zoom_group)
 
         phead.addStretch(1)
         phead.addWidget(self.right_panel_btn)
         self.preview_state = QLabel("Stopped")
         self.preview_state.setObjectName("warnText")
         self.preview_state.hide()
-        cl.addLayout(phead)
+        cl.addWidget(preview_toolbar)
 
         self.preview_frame = QFrame()
         self.preview_frame.setObjectName("previewFrame")
@@ -1536,14 +1528,13 @@ class MainWindow(QMainWindow):
 
         self.hide_sub_btn = QPushButton("Hide Sub")
         self.hide_sub_btn.clicked.connect(self.toggle_preview_sub)
-        self.preview_play_button = QPushButton("▶ Play")
-        self.preview_play_button.setObjectName("success")
+        self.preview_play_button = MachineIconButton("play", "Play / Pause (Space)")
+        self.preview_play_button.setObjectName("previewPlay")
+        self.preview_play_button.setFixedSize(36, 36)
         self.preview_play_button.clicked.connect(self.toggle_play)
-        start_button = QPushButton("|◀")
-        start_button.setToolTip("Go to start")
+        start_button = MachineIconButton("previous", "Go to start")
         start_button.clicked.connect(lambda: self.editor_seek_global(0.0) if self.editor_timeline_active() else self.player.setPosition(0))
-        end_button = QPushButton("▶|")
-        end_button.setToolTip("Go to end")
+        end_button = MachineIconButton("next", "Go to end")
         end_button.clicked.connect(lambda: self.editor_seek_global(self.editor_master_total()) if self.editor_timeline_active() else self.player.setPosition(self.player.duration()))
         self.update_preview_btn = QPushButton("↻ Render cache ngầm")
         self.update_preview_btn.setObjectName("cyan")
@@ -2382,56 +2373,55 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.sequence_strip)
         self.refresh_sequence_tabs()
 
-        header = QHBoxLayout()
-        undo_button = QPushButton("↶ Undo"); undo_button.clicked.connect(self.undo_active_sequence)
-        redo_button = QPushButton("↷ Redo"); redo_button.clicked.connect(self.redo_active_sequence)
+        timeline_toolbar = MachineToolbar(); header = timeline_toolbar.layout
+        history_group = MachineToolbarGroup("History")
+        undo_button = MachineIconButton("undo", "Undo (Ctrl+Z)"); undo_button.clicked.connect(self.undo_active_sequence)
+        redo_button = MachineIconButton("redo", "Redo (Ctrl+Shift+Z)"); redo_button.clicked.connect(self.redo_active_sequence)
+        history_group.layout.addWidget(undo_button); history_group.layout.addWidget(redo_button); header.addWidget(history_group)
         self.undo_shortcut = QShortcut(QKeySequence.Undo, self); self.undo_shortcut.activated.connect(self.undo_active_sequence)
         self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Z"), self); self.redo_shortcut.activated.connect(self.redo_active_sequence)
         self.redo_windows_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self); self.redo_windows_shortcut.activated.connect(self.redo_active_sequence)
-        self.editor_use_timeline = QCheckBox("Dùng timeline khi Xuất Video")
+        self.editor_use_timeline = QCheckBox("Use timeline for Export")
         self.editor_use_timeline.setToolTip(
             "Bật: Xuất Video sẽ render các clip theo đúng thứ tự/trim trên timeline."
         )
         self.editor_use_timeline.toggled.connect(self.schedule_autosave)
         self.editor_use_timeline.toggled.connect(self.editor_timeline_mode_changed)
 
-        add_file = QPushButton("+ Video")
+        media_group = MachineToolbarGroup("Media")
+        add_file = MachineButton("Add", variant="toolbar", icon_name="plus")
         add_file.clicked.connect(self.editor_add_files)
-        add_queue = QPushButton("+ Từ danh sách trên")
+        add_queue = MachineButton("From Media", variant="toolbar", icon_name="media")
         add_queue.clicked.connect(self.editor_add_queue_selection)
+        media_group.layout.addWidget(add_file); media_group.layout.addWidget(add_queue); header.addWidget(media_group)
 
-        split = QPushButton("✂ Split")
+        edit_group = MachineToolbarGroup("Edit")
+        split = MachineButton("Split", variant="toolbar", icon_name="split")
         split.clicked.connect(self.editor_split_at_playhead)
-        delete_clip = QPushButton("🗑 Xóa đoạn")
-        delete_clip.setObjectName("dangerSmall")
+        delete_clip = MachineIconButton("trash", "Delete selected clip")
+        delete_clip.setObjectName("dangerIcon")
         delete_clip.clicked.connect(self.editor_delete_selected_clip)
+        edit_group.layout.addWidget(split); edit_group.layout.addWidget(delete_clip); header.addWidget(edit_group)
 
-        move_left = QPushButton("←")
-        move_left.setToolTip("Đưa clip sang trái")
+        navigation_group = MachineToolbarGroup("Navigate")
+        move_left = MachineIconButton("previous", "Move clip left")
         move_left.clicked.connect(lambda: self.editor_move_clip(-1))
-        move_right = QPushButton("→")
-        move_right.setToolTip("Đưa clip sang phải")
+        move_right = MachineIconButton("next", "Move clip right")
         move_right.clicked.connect(lambda: self.editor_move_clip(1))
+        navigation_group.layout.addWidget(move_left); navigation_group.layout.addWidget(move_right); header.addWidget(navigation_group)
 
-        trim_in = QPushButton("Đặt IN")
+        range_group = MachineToolbarGroup("Range")
+        trim_in = MachineButton("IN", variant="toolbar", icon_name="range")
         trim_in.setToolTip("Cắt bỏ phần trước vị trí Preview hiện tại")
         trim_in.clicked.connect(self.editor_set_in_at_playhead)
-        trim_out = QPushButton("Đặt OUT")
+        trim_out = MachineButton("OUT", variant="toolbar", icon_name="range")
         trim_out.setToolTip("Cắt bỏ phần sau vị trí Preview hiện tại")
         trim_out.clicked.connect(self.editor_set_out_at_playhead)
+        range_group.layout.addWidget(trim_in); range_group.layout.addWidget(trim_out); header.addWidget(range_group)
 
-        header.addWidget(undo_button); header.addWidget(redo_button)
-        header.addWidget(self.editor_use_timeline)
-        header.addWidget(add_file)
-        header.addWidget(add_queue)
-        header.addWidget(split)
-        header.addWidget(delete_clip)
-        header.addWidget(move_left)
-        header.addWidget(move_right)
-        header.addWidget(trim_in)
-        header.addWidget(trim_out)
         header.addStretch(1)
-        layout.addLayout(header)
+        header.addWidget(self.editor_use_timeline)
+        layout.addWidget(timeline_toolbar)
 
         # Timeline + horizontal scrolling.
         timeline_row = QHBoxLayout()
@@ -5612,7 +5602,9 @@ class MainWindow(QMainWindow):
 
     def _preview_playback_state_changed(self, state):
         if hasattr(self, "preview_play_button"):
-            self.preview_play_button.setText("❚❚ Pause" if state == QMediaPlayer.PlayingState else "▶ Play")
+            playing = state == QMediaPlayer.PlayingState
+            self.preview_play_button.setIcon(icon("pause" if playing else "play", "textPrimary", 20))
+            self.preview_play_button.setToolTip("Pause (Space)" if playing else "Play (Space)")
 
     def change_preview_zoom(self, delta):
         self.set_preview_zoom_percent(

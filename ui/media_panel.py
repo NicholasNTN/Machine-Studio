@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from PySide6.QtCore import QMimeData, Qt, QUrl, Signal
-from PySide6.QtGui import QDrag, QPixmap
+from PySide6.QtGui import QDrag, QFontMetrics, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget, QMenu, QInputDialog
 from .icons import icon
-from .widgets import MachineBadge, MachineButton, MachineIconButton, MachineSearchField
+from .widgets import MachineBadge, MachineButton, MachineIconButton, MachinePanelHeader, MachineSearchField
 
 
 class MediaCard(QFrame):
@@ -16,20 +16,26 @@ class MediaCard(QFrame):
     revealRequested = Signal(str)
 
     def __init__(self, path: str, duration: float = 0.0, thumbnail_path: str = "", display_name="", parent=None):
-        super().__init__(parent); self.path = str(path); self._press_pos = None
-        self.setObjectName("mediaCard"); self.setCursor(Qt.PointingHandCursor); self.setMinimumHeight(78)
-        row = QHBoxLayout(self); row.setContentsMargins(7, 7, 7, 7)
-        thumb = QLabel(); thumb.setObjectName("mediaThumb"); thumb.setAlignment(Qt.AlignCenter); thumb.setFixedSize(74, 54); thumb.setPixmap(icon("play").pixmap(18, 18))
+        super().__init__(parent); self.path = str(path); self._press_pos = None; self._full_name = display_name or Path(self.path).name
+        self.setObjectName("mediaCard"); self.setProperty("selected", False); self.setCursor(Qt.PointingHandCursor); self.setMinimumHeight(164); self.setToolTip(self._full_name)
+        row = QVBoxLayout(self); row.setContentsMargins(7, 7, 7, 7); row.setSpacing(7)
+        thumb = QLabel(); thumb.setObjectName("mediaThumb"); thumb.setAlignment(Qt.AlignCenter); thumb.setMinimumHeight(108); thumb.setPixmap(icon("play").pixmap(22, 22))
         pixmap = QPixmap(thumbnail_path)
-        if not pixmap.isNull(): thumb.setPixmap(pixmap.scaled(74, 54, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        row.addWidget(thumb)
-        text = QVBoxLayout(); name = QLabel(display_name or Path(self.path).name); name.setWordWrap(True); name.setObjectName("mediaName"); text.addWidget(name)
+        if not pixmap.isNull(): thumb.setPixmap(pixmap.scaled(240, 135, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        row.addWidget(thumb, 1)
+        self.name_label = QLabel(self._full_name); self.name_label.setWordWrap(False); self.name_label.setObjectName("mediaName"); row.addWidget(self.name_label)
+        meta = QHBoxLayout()
         seconds = max(0, int(duration or 0)); duration_label = MachineBadge(f"{seconds // 3600:02d}:{seconds // 60 % 60:02d}:{seconds % 60:02d}" if seconds else "VIDEO")
-        text.addWidget(duration_label, 0, Qt.AlignLeft); row.addLayout(text, 1)
-        button = MachineIconButton("plus", "Add to Timeline"); button.setObjectName("cardAdd"); button.clicked.connect(lambda: self.addRequested.emit(self.path)); row.addWidget(button)
+        meta.addWidget(duration_label); media_type = QLabel(Path(self.path).suffix.lstrip(".").upper() or "MEDIA"); media_type.setObjectName("mediaType"); meta.addWidget(media_type); meta.addStretch(1)
+        button = MachineIconButton("plus", "Add to Timeline"); button.setObjectName("cardAdd"); button.clicked.connect(lambda: self.addRequested.emit(self.path))
+        meta.addWidget(button); row.addLayout(meta)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event); width = max(40, self.name_label.width())
+        self.name_label.setText(QFontMetrics(self.name_label.font()).elidedText(self._full_name, Qt.ElideMiddle, width))
 
     def mousePressEvent(self, event):
-        self._press_pos = event.position(); self.selected.emit(self.path); super().mousePressEvent(event)
+        self._press_pos = event.position(); self.setProperty("selected", True); self.style().unpolish(self); self.style().polish(self); self.selected.emit(self.path); super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         self.addRequested.emit(self.path); super().mouseDoubleClickEvent(event)
@@ -62,12 +68,12 @@ class MediaPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent); self.setObjectName("toolPage"); self.setMinimumWidth(190); self._paths = []; self._metadata = {}; self._display_names = {}
         layout = QVBoxLayout(self); layout.setContentsMargins(10, 10, 10, 10)
-        title = QLabel("Media"); title.setObjectName("panelTitle"); layout.addWidget(title)
+        header = MachinePanelHeader("Media", "Project assets"); more = MachineIconButton("more", "Media options"); header.actions.addWidget(more); layout.addWidget(header)
         self.drop_area = QFrame(); self.drop_area.setObjectName("mediaDropArea"); drop = QVBoxLayout(self.drop_area); drop.addStretch(1)
         upload = QLabel(); upload.setPixmap(icon("upload", "textMuted").pixmap(26, 26)); upload.setAlignment(Qt.AlignCenter); drop.addWidget(upload)
         drop_title = QLabel("Import media"); drop_title.setObjectName("emptyTitle"); drop_title.setAlignment(Qt.AlignCenter); drop.addWidget(drop_title)
         hint = QLabel("Drop video, audio, or images here"); hint.setObjectName("hint"); hint.setAlignment(Qt.AlignCenter); drop.addWidget(hint); drop.addStretch(1); self.drop_area.setMinimumHeight(124); layout.addWidget(self.drop_area)
-        buttons = QHBoxLayout(); add = MachineButton("Import", variant="primary", icon_name="plus"); add.clicked.connect(self.addFilesRequested); folder = MachineButton("Folder", icon_name="folder"); folder.setToolTip("Import Folder"); folder.clicked.connect(self.importFolderRequested); buttons.addWidget(add); buttons.addWidget(folder); layout.addLayout(buttons)
+        buttons = QHBoxLayout(); add = MachineButton("Import Media", variant="primary", icon_name="import"); add.clicked.connect(self.addFilesRequested); folder = MachineButton("Folder", icon_name="folder"); folder.setToolTip("Import Folder"); folder.clicked.connect(self.importFolderRequested); buttons.addWidget(add, 1); buttons.addWidget(folder); layout.addLayout(buttons)
         self.search = MachineSearchField("Search media"); self.search.textChanged.connect(self._render); layout.addWidget(self.search)
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.cards = QWidget(); self.card_layout = QVBoxLayout(self.cards); self.card_layout.setContentsMargins(0, 0, 0, 0); self.scroll.setWidget(self.cards); layout.addWidget(self.scroll, 1)
 

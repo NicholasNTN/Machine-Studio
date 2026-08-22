@@ -38,7 +38,8 @@ class TopBar(QFrame):
             layout.addWidget(button)
         layout.addStretch(1)
 
-        self.project_status = QLabel("Project ready  ·  Autosave on")
+        self.saved_dot = QLabel("●"); self.saved_dot.setObjectName("savedDot"); layout.addWidget(self.saved_dot)
+        self.project_status = QLabel("Saved")
         self.project_status.setObjectName("projectStatus")
         layout.addWidget(self.project_status)
         export = MachineButton("Export", variant="primary", icon_name="export")

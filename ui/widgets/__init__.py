@@ -1,8 +1,8 @@
 """Shared, focused widgets used by Machine Studio panels."""
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout
+from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout
 
 from ..icons import icon
 
@@ -25,14 +25,20 @@ class MachineIconButton(QToolButton):
 
 class MachineToolButton(QPushButton):
     def __init__(self, text, icon_name, parent=None):
-        super().__init__(text, parent); self.setObjectName("toolButton"); self.setIcon(icon(icon_name))
+        super().__init__("", parent); self.setObjectName("toolButton"); self._icon_name = icon_name; self.setIcon(icon(icon_name, size=20)); self.setIconSize(QSize(20, 20))
         self.setToolTip(text); self.setAccessibleName(text); self.setCheckable(True); self.setCursor(Qt.PointingHandCursor)
+        self.toggled.connect(self._sync_icon)
+
+    def _sync_icon(self, checked): self.setIcon(icon(self._icon_name, "accent" if checked else "textSecondary", 20))
 
 
 class MachineNavButton(QPushButton):
     def __init__(self, text, icon_name, parent=None):
-        super().__init__(text, parent); self.setObjectName("navButton"); self.setIcon(icon(icon_name))
+        super().__init__(text, parent); self.setObjectName("navButton"); self._icon_name = icon_name; self.setIcon(icon(icon_name, size=18))
         self.setCheckable(True); self.setCursor(Qt.PointingHandCursor)
+        self.toggled.connect(self._sync_icon)
+
+    def _sync_icon(self, checked): self.setIcon(icon(self._icon_name, "accent" if checked else "textSecondary", 18))
 
 
 class MachineCard(QFrame):
@@ -78,3 +84,30 @@ class MachineToast(QFrame):
     def showMessage(self, message, timeout=3000):
         self.label.setText(str(message)); self.adjustSize(); self.show(); self.raise_()
         QTimer.singleShot(max(500, int(timeout)), self.hide)
+
+
+class MachinePanelHeader(QFrame):
+    def __init__(self, title, description="", parent=None):
+        super().__init__(parent); self.setObjectName("panelHeader"); row = QHBoxLayout(self); row.setContentsMargins(0, 0, 0, 6)
+        labels = QVBoxLayout(); heading = QLabel(title); heading.setObjectName("panelTitle"); labels.addWidget(heading)
+        if description:
+            hint = QLabel(description); hint.setObjectName("panelDescription"); labels.addWidget(hint)
+        row.addLayout(labels); row.addStretch(1); self.actions = QHBoxLayout(); row.addLayout(self.actions)
+
+
+class MachineToolbar(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent); self.setObjectName("machineToolbar"); self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(6, 4, 6, 4); self.layout.setSpacing(4)
+
+
+class MachineToolbarGroup(QFrame):
+    def __init__(self, label="", parent=None):
+        super().__init__(parent); self.setObjectName("toolbarGroup"); row = QHBoxLayout(self)
+        row.setContentsMargins(3, 0, 3, 0); row.setSpacing(2); self.layout = row
+        if label:
+            caption = QLabel(label); caption.setObjectName("toolbarLabel"); row.addWidget(caption)
+
+
+class MachineSwitch(QCheckBox):
+    pass

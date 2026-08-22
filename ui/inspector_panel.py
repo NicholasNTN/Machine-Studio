@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QStackedWidget, QTextEdit, QVBoxLayout, QWidget
+from .icons import machine_pixmap
+from .widgets import MachineButton, MachinePanelHeader, MachineSection
 
 
 class InspectorPanel(QFrame):
@@ -12,7 +14,7 @@ class InspectorPanel(QFrame):
     def __init__(self, selection_manager=None, parent=None):
         super().__init__(parent); self.setObjectName("inspectorPanel"); self.setMinimumWidth(280); self._loading = False; self._controls = {}
         root = QVBoxLayout(self); root.setContentsMargins(10, 10, 10, 10)
-        title = QLabel("Inspector"); title.setObjectName("panelTitle"); root.addWidget(title)
+        root.addWidget(MachinePanelHeader("Video", "Selected clip"))
         self.stack = QStackedWidget(); root.addWidget(self.stack, 1); self.empty_page = self._empty_page(); self.stack.addWidget(self.empty_page); self.pages = {}
         for kind in self.KINDS:
             page = self._make_page(kind); self.pages[kind] = page; self.stack.addWidget(page)
@@ -35,11 +37,12 @@ class InspectorPanel(QFrame):
 
     def _empty_page(self):
         page = QWidget(); layout = QVBoxLayout(page); layout.addStretch(1)
-        icon = QLabel("◇"); icon.setObjectName("emptyIcon"); icon.setAlignment(Qt.AlignCenter); layout.addWidget(icon)
+        icon = QLabel(); icon.setPixmap(machine_pixmap("editor", "textMuted", 32)); icon.setObjectName("emptyIcon"); icon.setAlignment(Qt.AlignCenter); layout.addWidget(icon)
         label = QLabel("Select an item to edit"); label.setObjectName("emptyTitle"); label.setAlignment(Qt.AlignCenter); layout.addWidget(label)
         hint = QLabel("Choose a clip, text, subtitle, blur, or image in the preview or timeline."); hint.setObjectName("hint"); hint.setWordWrap(True); hint.setAlignment(Qt.AlignCenter); layout.addWidget(hint); layout.addStretch(2); return page
 
     def _make_page(self, kind):
+        if kind == "video": return self._make_video_page()
         scroll = QScrollArea(); scroll.setWidgetResizable(True); body = QWidget(); form = QFormLayout(body)
         heading = QLabel("Image / Logo" if kind in ("image", "logo") else kind.title()); heading.setObjectName("inspectorHeading"); form.addRow(heading)
         if kind in ("audio", "text", "subtitle"):
@@ -80,15 +83,47 @@ class InspectorPanel(QFrame):
             self._double(form, kind, "strength", "Strength", 0, 100, 20); self._double(form, kind, "opacity", "Opacity", 0, 100, 20)
         scroll.setWidget(body); return scroll
 
+    def _make_video_page(self):
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); body = QWidget(); layout = QVBoxLayout(body)
+        layout.setContentsMargins(2, 2, 2, 2); layout.setSpacing(8)
+
+        transform = MachineSection("Transform")
+        tf = QFormLayout(); tf.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter); tf.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self._double(tf, "video", "position_x", "Position X", -100, 200, 50)
+        self._double(tf, "video", "position_y", "Position Y", -100, 200, 50)
+        self._double(tf, "video", "scale_x", "Scale X", 1, 500, 100)
+        self._double(tf, "video", "scale_y", "Scale Y", 1, 500, 100)
+        self._double(tf, "video", "rotation", "Rotation", -360, 360, 0)
+        self._double(tf, "video", "opacity", "Opacity", 0, 100, 100)
+        horizontal = QHBoxLayout()
+        for label, value in (("Left", 0), ("Center", 50), ("Right", 100)):
+            button = MachineButton(label, variant="ghost"); button.clicked.connect(lambda _=False, v=value: self.propertyChanged.emit("position_x", v)); horizontal.addWidget(button)
+        tf.addRow("Align", horizontal)
+        reset = MachineButton("Reset Transform", variant="secondary", icon_name="reset"); reset.clicked.connect(lambda: self.propertyChanged.emit("reset_transform", True)); tf.addRow(reset)
+        transform.body.addLayout(tf); layout.addWidget(transform)
+
+        audio = MachineSection("Audio")
+        af = QFormLayout(); af.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self._double(af, "video", "volume", "Volume", 0, 200, 100); self._check(af, "video", "muted", "Mute")
+        audio.body.addLayout(af); layout.addWidget(audio)
+
+        arrangement = MachineSection("Layout")
+        lf = QFormLayout(); lf.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        mode = QComboBox(); mode.addItems(["Fit", "Fill"]); mode.setMaximumWidth(140); self._bind("video", "fit_mode", mode, "currentTextChanged", lambda w: w.currentText().lower()); lf.addRow("Fit mode", mode)
+        self._check(lf, "video", "uniform_scale", "Uniform scale")
+        self._check(lf, "video", "flip_horizontal", "Flip horizontal"); self._check(lf, "video", "flip_vertical", "Flip vertical")
+        arrangement.body.addLayout(lf); layout.addWidget(arrangement); layout.addStretch(1)
+        scroll.setWidget(body); return scroll
+
     def _bind(self, kind, key, widget, signal_name, getter):
         self._controls[(kind, key)] = widget
         getattr(widget, signal_name).connect(lambda *_, k=key, w=widget, g=getter: None if self._loading else self.propertyChanged.emit(k, g(w)))
 
     def _spin(self, form, kind, key, label, low, high, value):
-        widget = QSpinBox(); widget.setRange(low, high); widget.setValue(value); self._bind(kind, key, widget, "valueChanged", lambda w: w.value()); form.addRow(label, widget)
+        widget = QSpinBox(); widget.setMaximumWidth(140); widget.setAlignment(Qt.AlignRight); widget.setRange(low, high); widget.setValue(value); self._bind(kind, key, widget, "valueChanged", lambda w: w.value()); form.addRow(label, widget)
 
     def _double(self, form, kind, key, label, low, high, value):
-        widget = QDoubleSpinBox(); widget.setRange(low, high); widget.setValue(value); widget.setDecimals(2); self._bind(kind, key, widget, "valueChanged", lambda w: w.value()); form.addRow(label, widget)
+        widget = QDoubleSpinBox(); widget.setMaximumWidth(140); widget.setAlignment(Qt.AlignRight); widget.setRange(low, high); widget.setValue(value); widget.setDecimals(2); self._bind(kind, key, widget, "valueChanged", lambda w: w.value()); form.addRow(label, widget)
 
     def _check(self, form, kind, key, label):
         widget = QCheckBox(); self._bind(kind, key, widget, "toggled", lambda w: w.isChecked()); form.addRow(label, widget)

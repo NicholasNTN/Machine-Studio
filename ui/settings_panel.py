@@ -11,8 +11,11 @@ class SettingsPanel(QFrame):
         self.description = QLabel("Clip and library details"); self.description.setObjectName("panelDescription"); self.description.setWordWrap(True); layout.addWidget(self.description)
         self.stack = QStackedWidget(); self._indexes = {}
         for key, content in pages.items():
-            scroll = QScrollArea(); scroll.setWidgetResizable(True); holder = QWidget(); body = QVBoxLayout(holder); body.setContentsMargins(4, 4, 4, 4); body.addWidget(content); body.addStretch(1); scroll.setWidget(holder)
-            self._indexes[key] = self.stack.addWidget(scroll)
+            if key == "video_clip":
+                self._indexes[key] = self.stack.addWidget(content)
+            else:
+                scroll = QScrollArea(); scroll.setWidgetResizable(True); holder = QWidget(); body = QVBoxLayout(holder); body.setContentsMargins(4, 4, 4, 4); body.addWidget(content); body.addStretch(1); scroll.setWidget(holder)
+                self._indexes[key] = self.stack.addWidget(scroll)
         layout.addWidget(self.stack, 1)
 
     def set_page(self, key):

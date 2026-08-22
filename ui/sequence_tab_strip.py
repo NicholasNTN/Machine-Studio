@@ -17,7 +17,7 @@ class SequenceTabButton(QWidget):
         self.sequence_id = sequence_id
         self.setProperty("active", bool(active))
         self.setObjectName("sequenceTabButton")
-        self.setFixedHeight(26)
+        self.setFixedHeight(30)
         self.setCursor(Qt.PointingHandCursor)
 
         row = QHBoxLayout(self)
@@ -69,7 +69,7 @@ class SequenceTabStrip(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sequenceTabStrip")
-        self.setFixedHeight(28)
+        self.setFixedHeight(32)
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(2)
@@ -78,7 +78,7 @@ class SequenceTabStrip(QWidget):
         self.plus_button.setIcon(icon("plus"))
         self.plus_button.setToolTip("New Timeline")
         self.plus_button.setAutoRaise(True)
-        self.plus_button.setFixedSize(24, 24)
+        self.plus_button.setFixedSize(28, 28)
         self.plus_button.setCursor(Qt.PointingHandCursor)
         self.plus_button.clicked.connect(self.newSequenceRequested.emit)
         self._layout.addWidget(self.plus_button)
@@ -105,7 +105,7 @@ class SequenceTabStrip(QWidget):
         self.plus_button.setIcon(icon("plus"))
         self.plus_button.setToolTip("New Timeline")
         self.plus_button.setAutoRaise(True)
-        self.plus_button.setFixedSize(24, 24)
+        self.plus_button.setFixedSize(28, 28)
         self.plus_button.setCursor(Qt.PointingHandCursor)
         self.plus_button.clicked.connect(self.newSequenceRequested.emit)
         self._layout.addWidget(self.plus_button)
