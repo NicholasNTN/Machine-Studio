@@ -22,7 +22,7 @@ from core.last_used_preferences import LastUsedPreferences, safe_int, safe_float
 from core import editor_engine, subtitle_engine, ffmpeg_engine
 from core.script_roles import assign_role, voice_for_role
 from core.media_library import migrate_global_media_library
-from core.sequence_context import active_editor_source, active_narration_path, find_origin_sequence
+from core.sequence_context import active_editor_source, find_origin_sequence
 from core.sequence_context import sequence_narration_path
 from core.file_dialog_history import FileDialogHistory
 from core.render_snapshot import build_render_snapshot, snapshot_resolution
@@ -56,6 +56,17 @@ class EditorDomainTests(unittest.TestCase):
                             and isinstance(node.func, ast.Attribute) and node.func.attr == "_preview_resolution"]
         self.assertTrue(all(len(call.args) == 2 for call in resolution_calls))
 
+    def test_capture_active_sequence_uses_canonical_narration_resolver(self):
+        tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+        methods = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        capture = next(node for node in methods if node.name == "capture_active_sequence")
+        calls = [node for node in ast.walk(capture) if isinstance(node, ast.Call)]
+        names = {getattr(node.func, "id", "") for node in calls}
+        self.assertIn("resolve_export_narration", names)
+        self.assertNotIn("active_narration_path", names)
+        resolver = next(node for node in calls if getattr(node.func, "id", "") == "resolve_export_narration")
+        self.assertEqual(len(resolver.args), 2)
+
     def test_processed_preview_result_is_cached_without_cross_timeline_display(self):
         manager = SequenceManager(); first = manager.active; second = manager.create()
         manager.activate(second.id)
@@ -76,6 +87,15 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(resolve_export_narration(state, "preview.wav"), "preview.wav")
         self.assertEqual(resolve_export_narration(state), "latest.wav")
         self.assertEqual(resolve_export_narration({}, ""), "")
+
+    def test_sequence_narration_resolution_preserves_timeline_isolation(self):
+        states = [
+            {"narration_path": "voice-a.wav"},
+            {"narration_path": "voice-b.wav"},
+            {"narration_path": ""},
+        ]
+        self.assertEqual([resolve_export_narration(state) for state in states],
+                         ["voice-a.wav", "voice-b.wav", ""])
 
     def test_tts_regeneration_invalidates_then_publishes_synced_revision(self):
         stale = begin_narration_generation({"narration_revision": 4, "narration_synced_revision": 4,
@@ -188,12 +208,6 @@ class EditorDomainTests(unittest.TestCase):
         self.assertEqual(sequence_narration_path(manager.sequences, second.id), "voice-b.wav")
         first.state["narration_path"] = ""
         self.assertEqual(sequence_narration_path(manager.sequences, first.id), "")
-
-    def test_active_narration_reconciles_ui_sequence_and_preview_mirrors(self):
-        self.assertEqual(active_narration_path("voice-ui.wav", "voice-state.wav", "voice-preview.wav"), "voice-ui.wav")
-        self.assertEqual(active_narration_path("", "voice-state.wav", "voice-preview.wav"), "voice-state.wav")
-        self.assertEqual(active_narration_path("", "", "voice-preview.wav"), "voice-preview.wav")
-        self.assertEqual(active_narration_path({}, [], ()), "")
 
     def test_narration_only_and_mixed_audio_plans_are_explicit(self):
         label, expression = ffmpeg_engine.audio_mix_filter(["anar"])

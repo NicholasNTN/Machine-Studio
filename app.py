@@ -2160,7 +2160,19 @@ class MainWindow(QMainWindow):
         self.capture_project_state(sequence_capture=False)
         state = self.export_state_dict()
         state.pop("workspace_splitter_sizes", None)
-        narration = active_narration_path(self.voice_file.text(), self.narration_path)
+        voice_file_text = self.voice_file.text().strip()
+        legacy_narration_path = self.narration_path
+        narration = resolve_export_narration(
+            sequence.state,
+            voice_file_text,
+        )
+        self.log_line(
+            "[VOICE CAPTURE]\n"
+            f"sequence_id={sequence.id}\n"
+            f"voice_file_text={voice_file_text}\n"
+            f"legacy_narration_path={legacy_narration_path}\n"
+            f"resolved_sequence_narration={narration}"
+        )
         self.narration_path = narration
         state.update({"preview_cues": list(self.preview_cues), "subtitle_editor_text": self.sub_editor.toPlainText(),
                       "subtitle_path": self.sub_path.text().strip(), "narration_path": narration})
@@ -8218,6 +8230,11 @@ class MainWindow(QMainWindow):
         self.capture_active_sequence()
         sequence_path_after_capture = sequence_narration_path(self.sequence_manager.sequences, export_sequence_id)
         snapshot = build_render_snapshot(self.sequence_manager.sequences, export_sequence_id)
+        self.log_line(
+            "[VOICE SNAPSHOT]\n"
+            f"sequence_id={snapshot.sequence_id}\n"
+            f"narration_path={snapshot.audio.get('narration_path', '')}"
+        )
         has_editor_timeline = bool(snapshot.output.get("editor_use_timeline") and snapshot.clips)
         source_queue = tuple(self.queue)
         output_names = dict(getattr(self, "batch_output_names", {}) or {})
@@ -8259,6 +8276,11 @@ class MainWindow(QMainWindow):
             snapshot_log.parent.mkdir(parents=True, exist_ok=True)
             snapshot_log.write_text(json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8", errors="replace")
             options = self.gather_export_options(snapshot)
+            self.log_line(
+                "[VOICE EXPORT]\n"
+                f"sequence_id={snapshot.sequence_id}\n"
+                f"narration_path={options.narration_path}"
+            )
             export_sequence_narration_path = options.narration_path
             narration_check = ffm.validate_audio_file(options.narration_path) if options.narration_path else None
             if narration_check is not None and not narration_check["valid"]:
@@ -8644,6 +8666,11 @@ class MainWindow(QMainWindow):
         origin_sequence_id = self.sequence_manager.active_sequence_id
         self.capture_active_sequence()
         snapshot = build_render_snapshot(self.sequence_manager.sequences, origin_sequence_id)
+        self.log_line(
+            "[VOICE SNAPSHOT]\n"
+            f"sequence_id={snapshot.sequence_id}\n"
+            f"narration_path={snapshot.audio.get('narration_path', '')}"
+        )
         source = (
             str(snapshot.clips[0].get("path", ""))
             if snapshot.clips else self.current_video() or self.project.video_path
