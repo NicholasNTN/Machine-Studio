@@ -183,6 +183,38 @@ class EditorDomainTests(unittest.TestCase):
         self.assertFalse(before[2]["audio"]["narration_enabled"])
         self.assertIn("Canvas image background", build_render_snapshot(restored.sequences, third.id).validate().errors[0])
 
+    def test_export_snapshot_remains_bound_to_origin_while_other_sequence_mutates(self):
+        manager = SequenceManager(); origin = manager.active
+        origin.state = {"editor_clips": [{"path": "a.mp4", "enabled": True, "source_start": 0, "source_end": 4,
+                                           "transform": {"fit_mode": "fit"}}],
+                        "blur_zones": [{"id": "a", "x": 10, "y": 70, "w": 80, "h": 10}],
+                        "narration_path": "voice-a.wav", "project_aspect_ratio": "16:9",
+                        "project_canvas_dimensions": [1920, 1080]}
+        other = manager.create(); other.state = {"editor_layers": [{"id": "text-b", "text": "before"}]}
+        snapshot = build_render_snapshot(manager.sequences, origin.id)
+        origin_id = snapshot.sequence_id
+        other.state["editor_layers"][0]["text"] = "after"
+        origin.state["blur_zones"][0]["x"] = 90
+        manager.activate(other.id)
+        self.assertEqual(snapshot.sequence_id, origin_id)
+        self.assertEqual(snapshot.blur["zones"][0]["x"], .10)
+        self.assertEqual(snapshot.audio["narration_path"], "voice-a.wav")
+
+    def test_export_and_sequence_switch_do_not_use_blocking_or_shared_worker_patterns(self):
+        tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+        methods = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+        close_calls = [node for node in ast.walk(methods["closeEvent"]) if isinstance(node, ast.Call)]
+        self.assertFalse(any(isinstance(node.func, ast.Attribute) and node.func.attr == "wait" for node in close_calls))
+        export = methods["export_batch"]
+        nested_job = next(node for node in export.body if isinstance(node, ast.FunctionDef) and node.name == "job")
+        job_attributes = {node.attr for node in ast.walk(nested_job) if isinstance(node, ast.Attribute)}
+        self.assertNotIn("sequence_manager", job_attributes)
+        source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn('export_job_id = uuid4().hex', source)
+        self.assertIn('"render_jobs" / export_job_id', source)
+        self.assertIn('self.export_process_holder = {"process": None}', source)
+        self.assertIn('self.preview_process_holder = {"process": None}', source)
+
     def test_snapshot_resolution_follows_preview_canvas_aspect(self):
         self.assertEqual(snapshot_resolution({"resolution": "1920x1080 (YouTube)", "aspect_ratio": "9:16"}), "1080x1920")
         self.assertEqual(snapshot_resolution({"resolution": "1080x1920", "aspect_ratio": "16:9"}), "1920x1080")

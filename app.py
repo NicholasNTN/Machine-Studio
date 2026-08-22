@@ -9,6 +9,8 @@ import re
 import json
 import faulthandler
 import datetime
+import threading
+import time
 from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -600,6 +602,10 @@ class MainWindow(QMainWindow):
         self._last_valid_source_aspect = 16 / 9
         self.stop_requested = False
         self.process_holder = {"process": None}
+        self.preview_process_holder = {"process": None}
+        self.export_process_holder = {"process": None}
+        self.export_worker = None
+        self.export_cancel_event = threading.Event()
         self.editor_document = EditorDocument(self)
         self.sequence_manager = SequenceManager()
         self._sequence_undo_stacks = {
@@ -621,6 +627,7 @@ class MainWindow(QMainWindow):
         self.preview_should_autoplay = False
         self.preview_previous_proxy = ""
         self.preview_loaded_path = ""
+        self._preview_still_pending = set()
         self.preview_zoom_percent = 100
 
         # v1.0.12 Basic Video Editor state.
@@ -2197,34 +2204,119 @@ class MainWindow(QMainWindow):
                 "logo_enabled": False, "logo_path": "", "overlay_enabled": False, "overlay_text": "", "music_file": "",
                 "editor_use_timeline": True}
 
+    @staticmethod
+    def _append_sequence_switch_log(text):
+        path = ROOT / "logs" / "sequence_switch.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8", errors="replace") as handle:
+            handle.write(str(text).rstrip() + "\n")
+
+    def _log_sequence_state(self, sequence):
+        state = dict(sequence.state or {})
+        project = dict(sequence.ai_project or {})
+        clips = state.get("editor_clips") if isinstance(state.get("editor_clips"), list) else []
+        layers = state.get("editor_layers") if isinstance(state.get("editor_layers"), list) else []
+        zones = state.get("blur_zones") if isinstance(state.get("blur_zones"), list) else []
+        cues = state.get("preview_cues") if isinstance(state.get("preview_cues"), list) else []
+        groups = state.get("subtitle_groups") if isinstance(state.get("subtitle_groups"), dict) else {}
+        narration = str(state.get("narration_path", "") or "")
+        video = str(clips[0].get("path", "") if clips else project.get("video_path", "") or "")
+        processed = str(project.get("processed_preview_path", "") or "")
+        canvas = state.get("canvas_background") if isinstance(state.get("canvas_background"), dict) else {}
+        transform = clips[0].get("transform", {}) if clips else {}
+        self._append_sequence_switch_log("\n".join([
+            "[SEQUENCE STATE]", f"id={sequence.id}", f"name={sequence.name}",
+            f"clip_count={len(clips)}", f"layer_count={len(layers)}", f"blur_count={len(zones)}",
+            f"subtitle_cue_count={len(cues)}", f"subtitle_group_count={len(groups)}",
+            f"narration_path={narration}", f"narration_exists={bool(narration and Path(narration).is_file())}",
+            f"video_path={video}", f"processed_preview_path={processed}",
+            f"canvas_mode={canvas.get('mode', 'none')}", f"has_voice={bool(narration)}",
+            f"has_subtitle={bool(cues or state.get('subtitle_path'))}", f"has_blur={bool(zones)}",
+            f"video_transform={json.dumps(transform, ensure_ascii=False, default=str)}",
+        ]))
+
     def restore_active_sequence(self):
-        sequence = self.sequence_manager.active; self._switching_sequence = True; self._restoring_state = True
+        sequence = self.sequence_manager.active
+        previous_id = getattr(self, "_last_restored_sequence_id", "")
+        previous = find_origin_sequence(self.sequence_manager.sequences, previous_id)
+        started = time.perf_counter(); timings = []
+        export_running = bool(self.export_worker and self.export_worker.isRunning())
+        self._append_sequence_switch_log("\n".join([
+            "[SEQUENCE SWITCH START]", f"from_id={previous_id}",
+            f"from_name={previous.name if previous else ''}", f"to_id={sequence.id}",
+            f"to_name={sequence.name}", f"export_running={export_running}",
+            f"timestamp={datetime.datetime.now().astimezone().isoformat()}",
+        ]))
+        self._log_sequence_state(sequence)
+        hang_handle = None
         try:
-            self.player.stop(); self.pause_live_audio_tracks()
-            self.project = self._project_from_payload(sequence.ai_project) if sequence.ai_project else AIProject()
+            hang_path = ROOT / "logs" / "hang_dump.log"; hang_path.parent.mkdir(parents=True, exist_ok=True)
+            hang_handle = hang_path.open("a", encoding="utf-8", errors="replace")
+            faulthandler.dump_traceback_later(5.0, repeat=False, file=hang_handle)
+        except Exception:
+            hang_handle = None
+
+        def step(name, action):
+            step_start = time.perf_counter()
+            self._append_sequence_switch_log(f"[SWITCH STEP START] name={name}")
+            result = action()
+            elapsed = (time.perf_counter() - step_start) * 1000
+            timings.append((name, elapsed))
+            self._append_sequence_switch_log(f"[SWITCH STEP END] name={name} elapsed_ms={elapsed:.2f}")
+            return result
+
+        self._switching_sequence = True; self._restoring_state = True
+        try:
+            step("01 player.stop", self.player.stop)
+            step("02 pause_live_audio_tracks", self.pause_live_audio_tracks)
+            self.project = step("03 project payload restore", lambda: self._project_from_payload(sequence.ai_project) if sequence.ai_project else AIProject())
             self.processed_preview_path = str(self.project.processed_preview_path or "")
             self.preview_pending_path = self.processed_preview_path if Path(self.processed_preview_path).is_file() else ""
             self.preview_is_processed = False
             state = self._empty_sequence_state(); state.update(deepcopy(sequence.state or {}))
             self.editor_clips.clear(); self.editor_layers.clear(); self.preview_cues = []; self.blur_zone_list.clear()
             self.editor_document.subtitle_groups.clear(); self.sub_editor.clear(); self.sub_path.clear(); self.voice_file.clear(); self.narration_path = ""
-            self.apply_export_state(state)
+            step("04 apply_export_state", lambda: self.apply_export_state(state))
             self._restoring_state = True
-            self.preview_cues = [tuple(cue) for cue in state.get("preview_cues", [])]
-            self.sub_editor.setPlainText(str(state.get("subtitle_editor_text", "")))
-            self.sub_path.setText(str(state.get("subtitle_path", ""))); self.narration_path = str(state.get("narration_path", "")); self.voice_file.setText(self.narration_path)
-            self._refresh_professional_panels()
-            self.ai_video_path.setText(self.project.video_path); self.ai_summary.setPlainText(self.project.analysis_summary); self.transcript.setPlainText(self.project.transcript); self.refresh_scene_table()
-            self.editor_document.commands.stack = self._sequence_undo_stacks.setdefault(sequence.id, QUndoStack(self))
-            self.editor_refresh_all()
+            def restore_subtitles():
+                self.preview_cues = [tuple(cue) for cue in state.get("preview_cues", [])]
+                self.sub_editor.setPlainText(str(state.get("subtitle_editor_text", "")))
+                self.sub_path.setText(str(state.get("subtitle_path", "")))
+            step("05 Subtitle restore", restore_subtitles)
+            def restore_voice():
+                self.narration_path = str(state.get("narration_path", "")); self.voice_file.setText(self.narration_path)
+            step("06 narration voice path restore", restore_voice)
+            step("07 refresh professional settings panels", self._refresh_professional_panels)
+            def restore_project_widgets():
+                self.ai_video_path.setText(self.project.video_path); self.ai_summary.setPlainText(self.project.analysis_summary); self.transcript.setPlainText(self.project.transcript)
+            step("08 project widgets", restore_project_widgets)
+            step("09 scene table refresh", self.refresh_scene_table)
+            step("10 bind UndoStack", lambda: setattr(self.editor_document.commands, "stack", self._sequence_undo_stacks.setdefault(sequence.id, QUndoStack(self))))
+            step("11 editor_refresh_all", self.editor_refresh_all)
             if self.editor_clips:
                 clip_index, source_second, _clip_start = editor_engine.locate_time(self.editor_clips, sequence.playhead)
-                self.editor_clip_selected(clip_index, seek=False); self.editor_seek_clip(clip_index, source_second, autoplay=False)
+                step("12 editor_clip_selected", lambda: self.editor_clip_selected(clip_index, seek=False))
+                step("13 editor_seek_clip", lambda: self.editor_seek_clip(clip_index, source_second, autoplay=False))
                 self.editor_document.set_playhead(sequence.playhead); self.editor_timeline.set_playhead(sequence.playhead)
-            else: self.clear_active_timeline_preview()
-            self.refresh_live_audio_sources(); self.update_preview_subtitle(sequence.playhead); self.update_live_overlay_state()
+            else: step("14 clear preview", self.clear_active_timeline_preview)
+            step("15 refresh_live_audio_sources", self.refresh_live_audio_sources)
+            step("16 update_preview_subtitle", lambda: self.update_preview_subtitle(sequence.playhead))
+            step("17 update_live_overlay_state", self.update_live_overlay_state)
+            self._last_restored_sequence_id = sequence.id
         finally:
             self._restoring_state = False; self._switching_sequence = False
+            try: faulthandler.cancel_dump_traceback_later()
+            except Exception: pass
+            if hang_handle:
+                try: hang_handle.close()
+                except Exception: pass
+            elapsed = (time.perf_counter() - started) * 1000
+            slowest = max(timings, key=lambda item: item[1]) if timings else ("unknown", elapsed)
+            if elapsed > 500:
+                self._append_sequence_switch_log("\n".join([
+                    "[SLOW SEQUENCE SWITCH]", f"sequence_id={sequence.id}", f"sequence_name={sequence.name}",
+                    f"elapsed_ms={elapsed:.2f}", f"slowest_step={slowest[0]} ({slowest[1]:.2f} ms)",
+                ]))
 
     def refresh_sequence_tabs(self):
         if hasattr(self, "sequence_strip"):
@@ -3297,7 +3389,7 @@ class MainWindow(QMainWindow):
                 str(out),
                 preview=True,
                 log=log,
-                process_holder=self.process_holder,
+                process_holder=self.preview_process_holder,
             )
 
         def done(path):
@@ -4601,6 +4693,8 @@ class MainWindow(QMainWindow):
                     self.preview_worker = None
                 if self.auto_detect_worker is worker:
                     self.auto_detect_worker = None
+                if self.export_worker is worker:
+                    self.export_worker = None
                 worker.deleteLater()
                 if self.preview_dirty and not (self.worker and self.worker.isRunning()):
                     self.preview_render_timer.start()
@@ -4922,18 +5016,17 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self.stop_current()
-            # Background cache normally completes quickly; let QThread finish cleanly.
             for worker in list(running):
-                try:
-                    worker.requestInterruption()
-                    worker.wait(1800)
-                except Exception:
-                    pass
-            still = [w for w in self._active_workers if w and w.isRunning()]
-            if still:
-                self.status("Đang dừng tác vụ nền... hãy đóng lại sau vài giây.")
-                event.ignore()
-                return
+                worker.requestInterruption()
+            self.status("Đang hủy Export và tác vụ nền...")
+            event.ignore()
+            def close_when_idle():
+                if any(w and w.isRunning() for w in self._active_workers):
+                    QTimer.singleShot(100, close_when_idle)
+                else:
+                    self.close()
+            QTimer.singleShot(100, close_when_idle)
+            return
         try:
             self.autosave_project()
         except Exception:
@@ -5750,7 +5843,7 @@ class MainWindow(QMainWindow):
             self.player.setPosition(pos)
 
     def show_preview_still_immediately(self, path: str):
-        """Paint a real video frame before QMediaPlayer is asked to Play."""
+        """Paint a cached frame now; extract a missing frame off the GUI thread."""
         if not hasattr(self, "live_overlay"):
             return
         try:
@@ -5763,17 +5856,37 @@ class MainWindow(QMainWindow):
             ).hexdigest()[:20]
             still_dir = ROOT / "preview_cache" / "stills"
             still_path = still_dir / f"{key}.jpg"
+            source_value = str(source.resolve())
+            origin_sequence_id = self.sequence_manager.active_sequence_id
 
-            ffm.extract_preview_still(
-                str(source),
-                str(still_path),
-                at_seconds=0.05,
-                width=960,
-            )
-            image = QImage(str(still_path))
-            if not image.isNull():
-                self.live_overlay.set_video_image(image)
-                self.preview_state.setText("Source Preview — Ready")
+            def display_if_current(result_path):
+                if self.sequence_manager.active_sequence_id != origin_sequence_id:
+                    return
+                try:
+                    if Path(self.preview_loaded_path).resolve() != Path(source_value).resolve():
+                        return
+                except Exception:
+                    return
+                image = QImage(str(result_path))
+                if not image.isNull():
+                    self.live_overlay.set_video_image(image)
+                    self.preview_state.setText("Source Preview — Ready")
+
+            if still_path.exists() and still_path.stat().st_size > 1000:
+                display_if_current(still_path)
+                return
+            if key in self._preview_still_pending:
+                return
+
+            self._preview_still_pending.add(key)
+            worker = Worker(lambda _progress, _log: ffm.extract_preview_still(
+                source_value, str(still_path), at_seconds=0.05, width=960,
+            ))
+            self._retain_worker(worker)
+            worker.done.connect(display_if_current)
+            worker.error.connect(lambda tb: self.log_line("[PREVIEW STILL ERROR]\n" + tb[-2500:]))
+            worker.finished.connect(lambda k=key: self._preview_still_pending.discard(k))
+            worker.start()
         except Exception:
             # Qt player may still supply a frame later; do not interrupt user.
             self.log_line(
@@ -8218,6 +8331,9 @@ class MainWindow(QMainWindow):
         return snapshot.export_options()
 
     def export_batch(self):
+        if self.export_worker and self.export_worker.isRunning():
+            QMessageBox.information(self, "Đang xuất", "Chỉ có thể chạy một tác vụ Export tại một thời điểm.")
+            return
         export_sequence_id = self.sequence_manager.active_sequence_id
         preview_narration_path = (
             self.narration_player.source().toLocalFile()
@@ -8236,7 +8352,7 @@ class MainWindow(QMainWindow):
                 active_sequence.state["narration_source_path"] = active_voice_path
         self.capture_active_sequence()
         sequence_path_after_capture = sequence_narration_path(self.sequence_manager.sequences, export_sequence_id)
-        snapshot = build_render_snapshot(self.sequence_manager.sequences, export_sequence_id)
+        snapshot = deepcopy(build_render_snapshot(self.sequence_manager.sequences, export_sequence_id))
         self.log_line(
             "[VOICE SNAPSHOT]\n"
             f"sequence_id={snapshot.sequence_id}\n"
@@ -8249,6 +8365,9 @@ class MainWindow(QMainWindow):
         if not self.queue and not has_editor_timeline:
             QMessageBox.warning(self, "Xuất Video", "Chưa có video.")
             return
+        export_job_id = uuid4().hex
+        export_job_dir = ROOT / "projects" / "render_jobs" / export_job_id
+        export_job_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             # Ensure current subtitle editor/project edits are persisted.
@@ -8282,22 +8401,22 @@ class MainWindow(QMainWindow):
             snapshot_log = ROOT / "logs" / "render_snapshot.json"
             snapshot_log.parent.mkdir(parents=True, exist_ok=True)
             snapshot_log.write_text(json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8", errors="replace")
-            options = self.gather_export_options(snapshot)
+            options = deepcopy(self.gather_export_options(snapshot))
+            if options.subtitle_path and Path(options.subtitle_path).is_file():
+                subtitle_copy = export_job_dir / ("subtitle" + Path(options.subtitle_path).suffix.lower())
+                shutil.copy2(options.subtitle_path, subtitle_copy)
+                options.subtitle_path = str(subtitle_copy)
+            if options.narration_path and Path(options.narration_path).is_file():
+                narration_copy = export_job_dir / ("narration" + Path(options.narration_path).suffix.lower())
+                shutil.copy2(options.narration_path, narration_copy)
+                options.narration_path = str(narration_copy)
             self.log_line(
                 "[VOICE EXPORT]\n"
                 f"sequence_id={snapshot.sequence_id}\n"
                 f"narration_path={options.narration_path}"
             )
             export_sequence_narration_path = options.narration_path
-            narration_check = ffm.validate_audio_file(options.narration_path) if options.narration_path else None
-            if narration_check is not None and not narration_check["valid"]:
-                QMessageBox.warning(
-                    self, "Xuất Video",
-                    "Timeline hiện tại có Voice nhưng file narration không hợp lệ.\n"
-                    "Hãy tạo lại Voice hoặc kiểm tra file audio."
-                )
-                return
-            self.stop_requested = False
+            self.export_cancel_event.clear()
             self.preview_render_timer.stop()
         except Exception:
             tb = traceback.format_exc()
@@ -8310,10 +8429,29 @@ class MainWindow(QMainWindow):
         voice_debug_log = ROOT / "logs" / "voice_export_debug.log"
         export_sequence = find_origin_sequence(self.sequence_manager.sequences, export_sequence_id)
         export_sequence_name = export_sequence.name if export_sequence is not None else ""
+        export_process_holder = {"process": None}
+        self.export_process_holder = export_process_holder
 
         def job(progress, log):
+            emit_log = log
+            last_frame_log = [0.0]
+            def throttled_log(text):
+                value = str(text)
+                if value.lstrip().startswith("frame="):
+                    now = time.monotonic()
+                    if now - last_frame_log[0] < 0.15:
+                        return
+                    last_frame_log[0] = now
+                emit_log(value)
+            log = throttled_log
             outputs = []
             narration_signal = None
+            narration_check = ffm.validate_audio_file(options.narration_path) if options.narration_path else None
+            if narration_check is not None and not narration_check["valid"]:
+                raise RuntimeError(
+                    "Timeline hiện tại có Voice nhưng file narration không hợp lệ. "
+                    "Hãy tạo lại Voice hoặc kiểm tra file audio."
+                )
             voice_candidates = {
                 "preview": preview_narration_path,
                 "sequence": sequence_path_after_capture,
@@ -8427,7 +8565,7 @@ class MainWindow(QMainWindow):
                     export_ffmpeg_log,
                     f"EXPORT FAILED\nexception_type={type(exc).__name__}",
                 )
-                self._write_export_error(
+                MainWindow._write_export_error(
                     export_error_log, export_ffmpeg_log,
                     sequence_id=export_sequence_id, sequence_name=export_sequence_name,
                     output_path=output_value, exc=exc,
@@ -8476,12 +8614,9 @@ class MainWindow(QMainWindow):
             # Basic Editor timeline replaces batch sources when enabled.
             if has_editor_timeline:
                 target = next_target("MachineStudio_Timeline.mp4")
-                temp_target = target.with_name(
-                    target.stem + ".__rendering__.mp4"
-                )
+                temp_target = export_job_dir / "final.__rendering__.mp4"
 
-                workspace = self.project_workspace_for(snapshot.clips[0]["path"])
-                timeline_source = workspace / "editor_timeline_source.mp4"
+                timeline_source = export_job_dir / "timeline_source.mp4"
                 begin_attempt(" | ".join(str(clip.get("path", "")) for clip in snapshot.clips), str(target))
 
                 target_size = ffm.parse_resolution(
@@ -8505,7 +8640,7 @@ class MainWindow(QMainWindow):
                     editor_engine.render_timeline(
                         list(snapshot.clips), str(timeline_source), target_width=tw,
                         target_height=th, preview=False, log=log,
-                        process_holder=self.process_holder, log_file=export_ffmpeg_log,
+                        process_holder=export_process_holder, log_file=export_ffmpeg_log,
                         stage="timeline render", canvas_background=snapshot.canvas,
                     )
                     progress(1, 2)
@@ -8514,7 +8649,7 @@ class MainWindow(QMainWindow):
                     options.canvas_background_mode = "none"
                     ffm.export_video(
                         str(timeline_source), str(temp_target), options, log=log,
-                        process_holder=self.process_holder, log_file=export_ffmpeg_log,
+                        process_holder=export_process_holder, log_file=export_ffmpeg_log,
                         stage="effects, subtitles, audio mix and final mux",
                     )
                     if not temp_target.exists() or temp_target.stat().st_size < 1024:
@@ -8528,11 +8663,11 @@ class MainWindow(QMainWindow):
                 return outputs
 
             for i, source in enumerate(source_queue):
-                if self.stop_requested:
+                if self.export_cancel_event.is_set():
                     break
 
                 target = next_target(source)
-                temp_target = target.with_name(target.stem + ".__rendering__.mp4")
+                temp_target = export_job_dir / f"final_{i:04d}.__rendering__.mp4"
                 try:
                     temp_target.unlink(missing_ok=True)
                 except Exception:
@@ -8549,7 +8684,7 @@ class MainWindow(QMainWindow):
                         str(temp_target),
                         options,
                         log=log,
-                        process_holder=self.process_holder,
+                    process_holder=export_process_holder,
                         log_file=export_ffmpeg_log,
                         stage="effects, subtitles, audio mix and final mux",
                     )
@@ -8572,18 +8707,32 @@ class MainWindow(QMainWindow):
         def done(outputs):
             if outputs:
                 self.last_exported_path = outputs[-1]
-            self.status(f"Xuất xong {len(outputs)} video.")
+            self.status(f"Đã xuất {export_sequence_name} ({len(outputs)} video).")
             QMessageBox.information(
                 self, "Xuất Video",
-                f"Đã xuất {len(outputs)} video vào:\n{out_dir}"
+                f"Đã xuất {export_sequence_name}.\n\n{len(outputs)} video tại:\n{out_dir}"
             )
 
-        self.run_worker("Đang xuất video...", job, done, error_handler=self._export_worker_error)
+        self.status(f"Đang xuất {export_sequence_name}...")
+        self.progress.setTask(f"Export {export_sequence_name}")
+        self.progress.setRange(0, 0)
+        worker = Worker(job)
+        self.export_worker = worker
+        self._retain_worker(worker)
+        worker.progress.connect(self.worker_progress)
+        worker.log.connect(self.route_log)
+        worker.error.connect(self._export_worker_error)
+        worker.done.connect(done)
+        worker.start()
 
     def stop_current(self):
         self.stop_requested = True
-        process = self.process_holder.get("process")
-        if process is not None:
+        self.export_cancel_event.set()
+        processes = [self.process_holder.get("process"), self.preview_process_holder.get("process"),
+                     self.export_process_holder.get("process")]
+        for process in processes:
+            if process is None:
+                continue
             try:
                 process.terminate()
             except Exception:
