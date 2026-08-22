@@ -42,6 +42,9 @@ secrets.json
 credentials.json
 settings.local.json
 user_settings.json
+settings.json
+settings.json.backup
+piper_voices/
 
 # IDE / OS
 .vscode/

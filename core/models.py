@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 import json
+from datetime import datetime, timezone
+from uuid import NAMESPACE_URL, uuid5
 
 
 @dataclass
@@ -32,6 +34,10 @@ class Scene:
 
 @dataclass
 class AIProject:
+    project_id: str = ""
+    name: str = ""
+    created_at: str = ""
+    updated_at: str = ""
     video_path: str = ""
     duration: float = 0.0
     interval: float = 6.0
@@ -59,10 +65,23 @@ class AIProject:
 
     @classmethod
     def load(cls, path: str | Path) -> "AIProject":
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        project_path = Path(path)
+        raw = json.loads(project_path.read_text(encoding="utf-8"))
         scenes = [Scene(**x) for x in raw.pop("scenes", [])]
-        obj = cls(**raw)
+        allowed = cls.__dataclass_fields__
+        obj = cls(**{key: value for key, value in raw.items() if key in allowed})
         obj.scenes = scenes
+        resolved = project_path.resolve()
+        stat = project_path.stat()
+        fallback_time = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+        if not obj.project_id:
+            obj.project_id = str(uuid5(NAMESPACE_URL, resolved.as_uri()))
+        if not obj.name:
+            obj.name = project_path.parent.name or (Path(obj.video_path).stem if obj.video_path else "Untitled Project")
+            if obj.name in (".", ""):
+                obj.name = Path(obj.video_path).stem if obj.video_path else "Untitled Project"
+        obj.created_at = obj.created_at or fallback_time
+        obj.updated_at = obj.updated_at or fallback_time
         return obj
 
 
