@@ -1,40 +1,67 @@
 from __future__ import annotations
 
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QStyle
+import warnings
+from functools import lru_cache
+from pathlib import Path
+
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
+
 from .theme import tokens
 
-try:
-    import qtawesome as qta
-except ImportError:  # Optional at runtime; packaged/legacy installs still start.
-    qta = None
 
-
-_NAMES = {
-    "brand": "fa5s.play-circle", "editor": "fa5s.cut", "ai": "fa5s.magic",
-    "download": "fa5s.download", "settings": "fa5s.cog", "media": "fa5s.photo-video",
-    "voice": "fa5s.microphone", "subtitle": "fa5s.closed-captioning", "text": "fa5s.font",
-    "blur": "fa5s.low-vision", "customize": "fa5s.sliders-h", "advanced": "fa5s.tools",
-    "export": "fa5s.file-export", "plus": "fa5s.plus", "trash": "fa5s.trash-alt",
-    "folder": "fa5s.folder-open", "search": "fa5s.search", "play": "fa5s.play",
-    "pause": "fa5s.pause", "close": "fa5s.times", "upload": "fa5s.cloud-upload-alt",
+ICON_ROOT = Path(__file__).resolve().parents[1] / "assets" / "icons" / "tabler"
+_FILES = {
+    "brand": "movie", "editor": "timeline", "ai": "sparkles", "download": "download",
+    "settings": "settings", "export": "file-export", "media": "photo-video",
+    "voice": "microphone", "subtitle": "captions", "text": "typography", "blur": "blur",
+    "customize": "adjustments", "advanced": "tools", "import": "file-plus",
+    "folder": "folder-open", "search": "search", "plus": "plus", "trash": "trash",
+    "undo": "arrow-back-up", "redo": "arrow-forward-up", "split": "cut",
+    "range": "brackets", "play": "player-play", "pause": "player-pause",
+    "previous": "player-skip-back", "next": "player-skip-forward", "zoom_in": "zoom-in",
+    "zoom_out": "zoom-out", "close": "x", "upload": "upload", "more": "dots",
+    "lock": "lock", "visible": "eye", "hidden": "eye-off", "volume": "volume",
+    "muted": "volume-off", "reset": "refresh", "chevron": "chevron-down",
 }
 
-_FALLBACK = {
-    "folder": QStyle.SP_DirOpenIcon, "trash": QStyle.SP_TrashIcon,
-    "play": QStyle.SP_MediaPlay, "pause": QStyle.SP_MediaPause,
-    "close": QStyle.SP_DockWidgetCloseButton, "plus": QStyle.SP_FileIcon,
-    "download": QStyle.SP_ArrowDown, "export": QStyle.SP_DialogSaveButton,
-}
+REQUIRED_ICONS = tuple(_FILES)
 
 
-def icon(name: str, color=None) -> QIcon:
+def icon_path(name: str) -> Path:
+    return ICON_ROOT / f"{_FILES.get(name, name)}.svg"
+
+
+@lru_cache(maxsize=256)
+def _pixmap(name: str, color: str, size: int) -> QPixmap:
+    path = icon_path(name)
+    if not path.is_file():
+        warnings.warn(f"Machine Studio icon missing: {name} ({path})", RuntimeWarning)
+        return QPixmap()
+    try:
+        svg = path.read_text(encoding="utf-8").replace("currentColor", color)
+        renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+        if not renderer.isValid():
+            raise ValueError("invalid SVG")
+        pixmap = QPixmap(size, size); pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap); renderer.render(painter); painter.end()
+        return pixmap
+    except (OSError, ValueError) as exc:
+        warnings.warn(f"Machine Studio icon failed to load: {name} ({exc})", RuntimeWarning)
+        return QPixmap()
+
+
+def machine_icon(name: str, color=None, size=None) -> QIcon:
     palette = tokens()["color"]
-    color = palette.get(color, color) if color else palette["textSecondary"]
-    if qta is not None:
-        try:
-            return qta.icon(_NAMES.get(name, "fa5s.circle"), color=color)
-        except Exception:
-            pass
-    app = QApplication.instance()
-    return app.style().standardIcon(_FALLBACK.get(name, QStyle.SP_FileIcon)) if app else QIcon()
+    resolved = palette.get(color, color) if color else palette["textSecondary"]
+    return QIcon(_pixmap(name, str(resolved), int(size or 20)))
+
+
+def machine_pixmap(name: str, color=None, size=None) -> QPixmap:
+    palette = tokens()["color"]
+    resolved = palette.get(color, color) if color else palette["textSecondary"]
+    return _pixmap(name, str(resolved), int(size or 20))
+
+
+icon = machine_icon
