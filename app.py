@@ -77,6 +77,7 @@ from core.sequence_context import active_editor_source, find_origin_sequence, se
 from core.render_snapshot import build_render_snapshot
 from core.narration_state import begin_narration_generation, finish_narration_generation, resolve_export_narration
 from core.preview_result import cache_processed_preview_result
+from core.project_manager import utc_now
 
 
 APP_NAME = "Machine Studio"
@@ -582,13 +583,15 @@ class PiperVoiceDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    returnToProjectsRequested = Signal()
+
+    def __init__(self, settings_root=None):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {VERSION}")
         self.resize(1720, 980)
         self.setAcceptDrops(True)
 
-        self.settings = SettingsStore(ROOT)
+        self.settings = SettingsStore(Path(settings_root or ROOT))
         self.last_used_preferences = LastUsedPreferences(self.settings.data)
         self.file_dialog_history = FileDialogHistory(self.settings.data, self.settings.save)
         self.project = AIProject()
@@ -710,7 +713,6 @@ class MainWindow(QMainWindow):
 
         self.log_line(get_system_summary())
         self.status("Sẵn sàng")
-        QTimer.singleShot(250, self.restore_last_project)
 
     # ==================================================================
     # BUILD UI
@@ -755,6 +757,7 @@ class MainWindow(QMainWindow):
         self.top_bar = self.app_shell.top_bar
         self.top_bar.sectionRequested.connect(self._open_top_section)
         self.top_bar.exportRequested.connect(self._top_export)
+        self.top_bar.projectsRequested.connect(self.return_to_projects)
         self.top_bar.set_active("editor")
         self.setCentralWidget(self.app_shell)
 
@@ -2262,7 +2265,10 @@ class MainWindow(QMainWindow):
         try:
             step("01 player.stop", self.player.stop)
             step("02 pause_live_audio_tracks", self.pause_live_audio_tracks)
+            document_metadata = {key: getattr(self.project, key, "") for key in ("project_id", "name", "created_at", "updated_at", "workspace")}
             self.project = step("03 project payload restore", lambda: self._project_from_payload(sequence.ai_project) if sequence.ai_project else AIProject())
+            for key, value in document_metadata.items():
+                if value and not getattr(self.project, key, ""): setattr(self.project, key, value)
             self.processed_preview_path = str(self.project.processed_preview_path or "")
             self.preview_pending_path = self.processed_preview_path if Path(self.processed_preview_path).is_file() else ""
             self.preview_is_processed = False
@@ -4768,7 +4774,7 @@ class MainWindow(QMainWindow):
     def schedule_autosave(self, *args):
         if self._restoring_state:
             return
-        if self.project.video_path:
+        if self.workspace_project_path or self.project.video_path:
             if hasattr(self, "top_bar"):
                 self.top_bar.set_project_status("Saving…")
             self.autosave_timer.start()
@@ -4796,19 +4802,20 @@ class MainWindow(QMainWindow):
             return
         try:
             self.capture_project_state()
+            self.project.updated_at = utc_now()
             self.project.save(path)
             self.settings.data["last_project"] = str(path)
             self.settings.save()
             self.autosave_label.setText(f"● Auto-save: {path.name}")
             if hasattr(self, "top_bar"):
-                self.top_bar.set_project_status(f"Autosaved  •  {path.name}")
+                self.top_bar.set_project_status(f"Autosaved  •  {self.project.name or path.stem}")
         except Exception as e:
             self.status(f"Auto-save lỗi: {e}")
             if hasattr(self, "top_bar"):
                 self.top_bar.set_project_status("Autosave error")
 
     def save_ai_project(self):
-        if not self.project.video_path:
+        if not self.project.video_path and not self.workspace_project_path:
             QMessageBox.warning(self, "Project", "Chưa có project.")
             return
         self.capture_project_state()
@@ -4822,6 +4829,7 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".json"):
             path += ".json"
         self.workspace_project_path = path
+        self.project.updated_at = utc_now()
         self.project.save(path)
         self.settings.data["last_project"] = path
         self.settings.save()
@@ -4840,6 +4848,8 @@ class MainWindow(QMainWindow):
             project = AIProject.load(path)
             self.workspace_project_path = str(Path(path))
             self.project = project
+            if hasattr(self, "top_bar"):
+                self.top_bar.set_project_status(f"Autosaved  •  {project.name or Path(path).stem}")
             packed = {"active_sequence_id": project.active_sequence_id, "sequences": project.sequences}
             self.sequence_manager = SequenceManager.from_dict(packed, project.export_state, self._project_payload())
             self.queue, media_names = migrate_global_media_library(
@@ -4862,7 +4872,7 @@ class MainWindow(QMainWindow):
                 self.restore_active_sequence()
                 self.settings.data["last_project"] = path; self.settings.save()
                 if show_message: QMessageBox.information(self, "Project", "Đã khôi phục project nhiều Timeline.")
-                return
+                return True
             self.ai_video_path.setText(project.video_path)
             self.ai_summary.setPlainText(project.analysis_summary)
             self.transcript.setPlainText(project.transcript)
@@ -4880,14 +4890,34 @@ class MainWindow(QMainWindow):
             self.settings.save()
             if show_message:
                 QMessageBox.information(self, "Project", "Đã khôi phục project.")
+            return True
         except Exception as e:
             QMessageBox.critical(self, "Project", str(e))
+            return False
 
     def restore_last_project(self):
         path = self.settings.data.get("last_project", "")
         if path and Path(path).exists():
             self.load_project_file(path, show_message=False)
             self.status("Đã tự khôi phục project gần nhất.")
+
+    def return_to_projects(self):
+        running = [worker for worker in self._active_workers if worker and worker.isRunning()]
+        if running:
+            answer = QMessageBox.question(
+                self, "Export is still running",
+                "Export or another background task is still running.\nStop it and return to Projects?",
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+            )
+            if answer != QMessageBox.Yes: return
+            self.stop_current()
+            for worker in running: worker.requestInterruption()
+            def return_when_idle():
+                if any(worker and worker.isRunning() for worker in self._active_workers):
+                    QTimer.singleShot(100, return_when_idle); return
+                self.autosave_project(); self.returnToProjectsRequested.emit()
+            QTimer.singleShot(100, return_when_idle); return
+        self.autosave_project(); self.returnToProjectsRequested.emit()
 
     def closeEvent(self, event: QCloseEvent):
         running = [w for w in self._active_workers if w and w.isRunning()]
@@ -9229,8 +9259,9 @@ def main():
     install_crash_logging()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    window = MainWindow()
-    window.show()
+    from core.application_controller import ApplicationController
+    controller = ApplicationController(app, ROOT)
+    controller.show_project_hub()
     sys.exit(app.exec())
 
 

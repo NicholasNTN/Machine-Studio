@@ -3,12 +3,13 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 from .icons import icon
-from .widgets import MachineButton, MachineNavButton
+from .widgets import MachineButton, MachineIconButton, MachineNavButton
 
 
 class TopBar(QFrame):
     sectionRequested = Signal(str)
     exportRequested = Signal()
+    projectsRequested = Signal()
 
     SECTIONS = (
         ("editor", "editor", "Video Editor"),
@@ -29,6 +30,7 @@ class TopBar(QFrame):
         brand = QLabel("Machine Studio")
         brand.setObjectName("brandLabel")
         layout.addWidget(brand)
+        projects = MachineIconButton("folder", "Projects"); projects.setFixedSize(30, 30); projects.clicked.connect(self.projectsRequested); layout.addWidget(projects)
         self.buttons = {}
         for key, icon_name, label in self.SECTIONS:
             button = MachineNavButton(label, icon_name)
