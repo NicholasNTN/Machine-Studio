@@ -70,13 +70,13 @@ def application_stylesheet() -> str:
     QToolButton#sequenceTabPlus:hover {{ background:{c['surfaceHover']}; color:{c['accent']}; }}
     QFrame#mediaDropArea {{ background:{c['background']}; border:1px dashed {c['borderStrong']}; border-radius:{r['large']}px; }}
     QFrame#mediaDropArea:hover {{ border-color:{c['accent']}; background:{c['surfaceRaised']}; }}
-    QFrame#mediaCard {{ background:{c['mediaCard']}; border:1px solid #273443; border-radius:{r['card']}px; }}
+    QFrame#mediaCard {{ background:{c['mediaCard']}; border:1px solid #273443; border-radius:{r['medium']}px; }}
     QFrame#mediaCard:hover {{ background:{c['mediaCardHover']}; border-color:{c['borderStrong']}; }}
-    QFrame#mediaCard[selected="true"] {{ background:{c['mediaCardSelected']}; border:1px solid {c['accent']}; }}
+    QFrame#mediaCard[selected="true"] {{ background:{c['mediaCardSelected']}; border:1px solid {c['accent']}; border-left:3px solid {c['accent']}; }}
     QLabel#mediaThumb {{ background:#070A0E; border-radius:{r['small']}px; color:{c['textMuted']}; }}
-    QLabel#mediaName {{ color:{c['textPrimary']}; font-weight:600; }} QLabel#mediaType {{ color:{c['textMuted']}; font-size:9px; }}
+    QLabel#mediaName {{ color:{c['textPrimary']}; font-weight:600; }} QLabel#mediaType, QLabel#mediaMetadata {{ color:{c['textMuted']}; font-size:9px; font-weight:500; }}
     QLabel#mediaDuration {{ background:#0C1218; color:#A8B3C1; border-radius:{r['tiny']}px; padding:1px 4px; font-size:9px; font-weight:500; }}
-    QPushButton#cardAdd, QToolButton#cardAdd {{ min-height:28px; max-height:28px; min-width:28px; max-width:28px; padding:0; border-radius:{r['small']}px; }}
+    QPushButton#cardAdd, QToolButton#cardAdd {{ min-height:26px; max-height:26px; min-width:26px; max-width:26px; padding:0; border-radius:{r['small']}px; }}
     QFrame#previewFrame, QLabel#exportPreview {{ background:{c['preview']}; border:1px solid {c['border']}; border-radius:{r['large']}px; }}
     QFrame#machineToolbar {{ min-height:36px; max-height:38px; background:{c['input']}; border:1px solid {c['border']}; border-radius:{r['medium']}px; }}
     QGroupBox#timelinePanel, QWidget#timelineSurface {{ background:{c['timeline']}; border:0; border-top:1px solid #293543; border-radius:{r['large']}px; margin-top:0; padding:0; }}

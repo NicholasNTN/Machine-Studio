@@ -45,9 +45,13 @@ def main():
     card = MediaCard(str(ROOT / "sample.mp4"), 65.0, "", "Sample clip")
     assert card.path.endswith("sample.mp4")
     panel = MediaPanel(); panel.resize(290, 700)
-    panel.set_media([str(ROOT / f"第{i}集-long-production-filename-785141989.mp4") for i in range(5)])
+    panel.set_media([str(ROOT / f"第{i}集(下)-大家都怕它-long-production-filename-785141989.mp4") for i in range(10)])
     panel.show(); qt.processEvents(); cards = panel.findChildren(MediaCard)
-    assert len(cards) == 5 and all(125 <= item.height() <= 150 for item in cards)
+    assert len(cards) == 10 and all(item.height() == 62 for item in cards)
+    assert cards[0].thumb.size().width() == 72 and cards[0].thumb.size().height() == 44
+    assert cards[0].name_label.text().endswith("…") and cards[0].name_label.toolTip().endswith(".mp4")
+    visible_cards = sum(1 for item in cards if item.geometry().intersects(panel.scroll.viewport().rect()))
+    assert visible_cards >= 7, f"only {visible_cards} compact media rows visible"
     selected = []; added = []; panel.mediaSelected.connect(selected.append); panel.mediaAddRequested.connect(added.append)
     QTest.mouseClick(cards[0], Qt.LeftButton); cards[0].findChild(QToolButton, "cardAdd").click()
     assert selected and added
