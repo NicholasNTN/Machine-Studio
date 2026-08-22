@@ -420,6 +420,22 @@ class EditorDomainTests(unittest.TestCase):
             self.assertAlmostEqual(rect.width / video.width, zone.width, places=6)
             self.assertAlmostEqual(rect.height / video.height, zone.height, places=6)
 
+    def test_blur_export_uses_primary_video_rect_not_canvas(self):
+        zone = BlurZone("subtitle", x=.10, y=.70, width=.80, height=.10)
+        portrait = ffmpeg_engine.blur_zone_output_rect(zone, 720, 960, 1080, 1920, {"fit_mode": "fit"})
+        landscape = ffmpeg_engine.blur_zone_output_rect(zone, 720, 960, 1920, 1080, {"fit_mode": "fit"})
+        self.assertEqual(portrait, (108, 1248, 864, 144))
+        self.assertEqual(landscape, (636, 756, 648, 108))
+        self.assertNotEqual(landscape, (192, 756, 1536, 108))
+
+    def test_auto_and_manual_blur_share_canonical_export_geometry(self):
+        geometry = (720, 960, 1920, 1080, {"fit_mode": "fit", "scale_x": 120, "scale_y": 90,
+                                           "position_x": 35, "position_y": 60})
+        manual = {"id": "manual", "x": .15, "y": .72, "width": .70, "height": .12, "source": "manual"}
+        automatic = {**manual, "id": "auto", "source": "auto_subtitle", "auto": True}
+        self.assertEqual(ffmpeg_engine.blur_zone_output_rect(manual, *geometry),
+                         ffmpeg_engine.blur_zone_output_rect(automatic, *geometry))
+
     def test_legacy_blur_percentages_upgrade_to_source_coordinates(self):
         zone = BlurZone.from_dict({"x": 12, "y": 73, "w": 75, "h": 16})
         self.assertEqual(zone.coordinate_space, "source_video")

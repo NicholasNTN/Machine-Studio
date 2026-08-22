@@ -553,6 +553,16 @@ def safe_blur_crop_rect(x, y, width, height, output_width, output_height) -> tup
     return x, y, max(2, width), max(2, height)
 
 
+def blur_zone_output_rect(zone, source_width, source_height, output_width, output_height, transform=None):
+    """Map one source-anchored zone through the canonical video display rect."""
+    mapped = source_zone_canvas_rect(
+        zone, source_width, source_height, output_width, output_height, transform,
+    )
+    return safe_blur_crop_rect(
+        mapped.x, mapped.y, mapped.width, mapped.height, output_width, output_height,
+    )
+
+
 def boxblur_filter(width: int, height: int, desired_radius: int) -> tuple[str, int, int]:
     luma, chroma = safe_boxblur_radii(width, height, desired_radius)
     value = f"boxblur=luma_radius={luma}:luma_power=2:chroma_radius={chroma}:chroma_power=2"
@@ -667,6 +677,10 @@ def export_video(
     out_h = target[1] if target else max(2, info.get("height") or 1080)
     transform = dict(getattr(options, "video_transform", {}) or {})
     transform.setdefault("fit_mode", options.fit_mode)
+    blur_transform = dict(getattr(options, "blur_video_transform", {}) or transform)
+    blur_transform.setdefault("fit_mode", options.fit_mode)
+    blur_source_width = max(1, int(getattr(options, "blur_source_width", 0) or info.get("width") or out_w))
+    blur_source_height = max(1, int(getattr(options, "blur_source_height", 0) or info.get("height") or out_h))
 
     if target:
         w, h = target
@@ -780,13 +794,12 @@ def export_video(
             if "x_px" in z:
                 raw_x = z["x_px"]; raw_y = z["y_px"]
                 raw_w = z["w_px"]; raw_h = z["h_px"]
+                x, y, zw, zh = safe_blur_crop_rect(raw_x, raw_y, raw_w, raw_h, out_w, out_h)
             else:
-                mapped = source_zone_canvas_rect(
-                    z, info.get("width") or out_w, info.get("height") or out_h,
-                    out_w, out_h, transform,
+                x, y, zw, zh = blur_zone_output_rect(
+                    z, blur_source_width, blur_source_height,
+                    out_w, out_h, blur_transform,
                 )
-                raw_x, raw_y, raw_w, raw_h = mapped.x, mapped.y, mapped.width, mapped.height
-            x, y, zw, zh = safe_blur_crop_rect(raw_x, raw_y, raw_w, raw_h, out_w, out_h)
             desired_radius = 0 if style == "Đen mờ" else max(0, round(4 + opacity * 0.22))
             blur_filter, luma_radius, chroma_radius = boxblur_filter(zw, zh, desired_radius)
             blur_log = (

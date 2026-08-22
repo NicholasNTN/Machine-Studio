@@ -8498,6 +8498,10 @@ class MainWindow(QMainWindow):
 
                 try:
                     verify_narration_source()
+                    primary_source_info = ffm.probe(snapshot.clips[0]["path"])
+                    options.blur_source_width = int(primary_source_info.get("width") or 0)
+                    options.blur_source_height = int(primary_source_info.get("height") or 0)
+                    options.blur_video_transform = deepcopy(snapshot.video_transform)
                     editor_engine.render_timeline(
                         list(snapshot.clips), str(timeline_source), target_width=tw,
                         target_height=th, preview=False, log=log,

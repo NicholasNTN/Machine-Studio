@@ -166,6 +166,11 @@ class ExportOptions:
     blur_zones: list[dict] = field(default_factory=list)
     blur_style: str = "Đen mờ"
     blur_opacity: int = 20
+    # Preserve source geometry when a timeline render has already baked the
+    # video transform into a canvas-sized intermediate.
+    blur_source_width: int = 0
+    blur_source_height: int = 0
+    blur_video_transform: dict = field(default_factory=dict)
     auto_cover_source_subtitle: bool = False
     auto_subtitle_zone: dict = field(default_factory=dict)
 
