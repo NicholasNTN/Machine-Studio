@@ -55,7 +55,7 @@ from ui.task_progress import TaskProgress
 from ui.sequence_tab_strip import SequenceTabStrip
 from services.preview_service import PreviewService
 from services.thumbnail_service import ThumbnailService
-from services.playback_controller import PlaybackController
+from services.playback_controller import PlaybackController, narration_status_action
 from editor.timeline_item import TimelineItem, TimelineItemKind
 from editor.subtitle_group import SubtitleGroupStyle, subtitle_group_is_visible, active_subtitle_render_state
 from editor.command_manager import LayerSnapshotCommand, TimelineSnapshotCommand
@@ -612,6 +612,8 @@ class MainWindow(QMainWindow):
             self.sequence_manager.active.id: self.editor_document.commands.stack
         }
         self._switching_sequence = False
+        self._audio_mix_updating = False
+        self._audio_mix_pending = False
         self.preview_service = PreviewService()
         self.thumbnail_service = ThumbnailService(ROOT / ".cache" / "thumbnails", self)
 
@@ -702,7 +704,6 @@ class MainWindow(QMainWindow):
         self.live_audio_sync_timer.timeout.connect(self.sync_live_audio_tracks)
         self.live_audio_sync_timer.start()
         self.music_player.mediaStatusChanged.connect(self.on_live_music_status)
-        self.narration_player.mediaStatusChanged.connect(self.on_narration_media_status)
 
         self.log_line(get_system_summary())
         self.status("Sẵn sàng")
@@ -2305,6 +2306,8 @@ class MainWindow(QMainWindow):
             self._last_restored_sequence_id = sequence.id
         finally:
             self._restoring_state = False; self._switching_sequence = False
+            if self._audio_mix_pending:
+                QTimer.singleShot(0, self.update_live_audio_mix)
             try: faulthandler.cancel_dump_traceback_later()
             except Exception: pass
             if hang_handle:
@@ -5372,14 +5375,29 @@ class MainWindow(QMainWindow):
     def replace_live_narration_source(self, path):
         replacement = replace_narration_source(self.current_audio_state(), path)
         current = self.narration_player.source().toLocalFile() if self.narration_player.source().isLocalFile() else ""
-        same_source = (str(Path(current)) == str(Path(replacement.source))) if current and replacement.source else (current == replacement.source)
+        def canonical(value):
+            try: return os.path.normcase(str(Path(value).resolve())) if value else ""
+            except (OSError, ValueError): return os.path.normcase(str(value or ""))
+        same_source = canonical(current) == canonical(replacement.source)
         if same_source:
             return
-        self.narration_player, self.narration_output = self.playback.rebuild_narration(
+        old_generation = self.playback.narration_generation
+        old_player_id = id(self.narration_player)
+        self._append_audio_session_log("\n".join([
+            "[NARRATION SESSION RETIRE]", f"generation={old_generation}",
+            f"player_id={old_player_id}",
+        ]))
+        self.narration_player, self.narration_output, generation = self.playback.rebuild_narration(
             replacement.source, volume=replacement.state.narration_volume,
             muted=replacement.state.narration_muted,
             status_callback=self.on_narration_media_status,
         )
+        sequence = self.sequence_manager.active
+        self._append_audio_session_log("\n".join([
+            "[NARRATION SESSION CREATE]", f"generation={generation}",
+            f"sequence_id={sequence.id if sequence else ''}", f"path={replacement.source}",
+            f"player_id={id(self.narration_player)}", f"output_id={id(self.narration_output)}",
+        ]))
         self.update_live_audio_mix()
         self.log_audio_state("main")
         self.log_audio_state("narration")
@@ -5393,9 +5411,34 @@ class MainWindow(QMainWindow):
         info = self.playback.narration_diagnostics()
         self.log_line("[AUDIO RELOAD] " + " ".join([f"timeline={timeline_name}"] + [f"{key}={value}" for key, value in info.items()]))
 
-    def on_narration_media_status(self, status):
+    def _append_audio_session_log(self, text):
+        try:
+            path = ROOT / "logs" / "audio_session.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8", errors="replace") as handle:
+                handle.write(f"{datetime.datetime.now().astimezone().isoformat()} {text}\n")
+        except OSError:
+            pass
+
+    def on_narration_media_status(self, player, output, generation, status):
+        action = narration_status_action(
+            generation, self.playback.narration_generation,
+            player, self.narration_player, output, self.narration_output,
+            switching=self._switching_sequence, restoring=self._restoring_state,
+        )
+        is_current = action != "ignore"
+        self._append_audio_session_log("\n".join([
+            "[NARRATION STATUS]", f"generation={generation}",
+            f"current_generation={self.playback.narration_generation}",
+            f"player_id={id(player)}", f"is_current={is_current}", f"status={status}",
+            f"switching={self._switching_sequence}", f"restoring={self._restoring_state}",
+        ]))
+        if action == "ignore":
+            return
         if status in (QMediaPlayer.LoadedMedia, QMediaPlayer.BufferedMedia):
-            self.narration_player.setAudioOutput(self.narration_output)
+            if action == "defer":
+                self._audio_mix_pending = True
+                return
             self.update_live_audio_mix()
         self.log_audio_state("narration", status)
 
@@ -5421,6 +5464,22 @@ class MainWindow(QMainWindow):
         self.update_live_audio_mix()
 
     def update_live_audio_mix(self, *args):
+        if self._switching_sequence or self._restoring_state:
+            self._audio_mix_pending = True
+            return
+        if self._audio_mix_updating:
+            if not self._audio_mix_pending:
+                self._audio_mix_pending = True
+                QTimer.singleShot(0, self.update_live_audio_mix)
+            return
+        self._audio_mix_updating = True
+        self._audio_mix_pending = False
+        try:
+            self._update_live_audio_mix_now()
+        finally:
+            self._audio_mix_updating = False
+
+    def _update_live_audio_mix_now(self):
         if self.preview_is_processed:
             self.audio_output.setVolume(max(0.0, min(1.0, self.source_volume.value() / 100)))
             self.narration_output.setVolume(0.0)

@@ -27,6 +27,7 @@ from core.sequence_context import sequence_narration_path
 from core.file_dialog_history import FileDialogHistory
 from core.render_snapshot import build_render_snapshot, snapshot_resolution
 from core.narration_state import begin_narration_generation, finish_narration_generation, resolve_export_narration
+from services.playback_controller import PlaybackController, narration_status_action
 from core.preview_result import cache_processed_preview_result
 from editor.text_style import TextStyle
 from editor.blur_zone import normalize_blur_zones
@@ -594,6 +595,55 @@ class EditorDomainTests(unittest.TestCase):
         second = manager.create(); second.state.update({"narration_path": "voice-b.wav", "preview_cues": [(0, 1, "B")], "blur_zones": [{"id": "b"}]})
         manager.activate(first.id); self.assertEqual(manager.active.state["narration_path"], "voice-a.wav")
         manager.activate(second.id); self.assertEqual(manager.active.state["blur_zones"][0]["id"], "b")
+
+    def test_narration_status_reentrancy_and_stale_generations(self):
+        old_player, old_output = object(), object()
+        current_player, current_output = object(), object()
+        # A synchronously emitted status during restore is coalesced, not applied.
+        self.assertEqual(narration_status_action(
+            3, 3, current_player, current_player, current_output, current_output,
+            restoring=True,
+        ), "defer")
+        # A delayed generation-1 callback cannot mutate generation 3.
+        self.assertEqual(narration_status_action(
+            1, 3, old_player, current_player, old_output, current_output,
+        ), "ignore")
+        self.assertEqual(narration_status_action(
+            3, 3, current_player, current_player, current_output, current_output,
+        ), "apply")
+
+    def test_narration_rebuild_installs_session_before_synchronous_status(self):
+        class FakeSignal:
+            def __init__(self): self.slot = None
+            def connect(self, slot): self.slot = slot
+            def disconnect(self, slot):
+                if self.slot is slot: self.slot = None
+
+        class FakePlayer:
+            def __init__(self): self.mediaStatusChanged = FakeSignal(); self.output = None
+            def setAudioOutput(self, output): self.output = output
+            def setSource(self, _url):
+                if self.mediaStatusChanged.slot: self.mediaStatusChanged.slot("synchronous")
+            def stop(self): pass
+            def deleteLater(self): pass
+
+        class FakeOutput:
+            def setVolume(self, value): self.volume = value
+            def setMuted(self, value): self.muted = value
+            def deleteLater(self): pass
+
+        class FakeController(PlaybackController):
+            def _pair(self): return FakePlayer(), FakeOutput()
+
+        controller = FakeController()
+        observed = []
+        callback = lambda player, output, generation, status: observed.append(
+            (player is controller.narration_player, output is controller.narration_output,
+             generation == controller.narration_generation, status)
+        )
+        with patch("services.playback_controller.QTimer.singleShot", side_effect=lambda _, fn: fn()):
+            controller.rebuild_narration("", volume=0.5, muted=False, status_callback=callback)
+        self.assertEqual(observed, [(True, True, True, "synchronous")])
 
     def test_auto_blur_is_canonical_sequence_content_and_legacy_state_migrates(self):
         zones = normalize_blur_zones([], {"id": "auto-a", "x": 10, "y": 70, "w": 80, "h": 12})

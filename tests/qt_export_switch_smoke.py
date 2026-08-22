@@ -43,17 +43,25 @@ def main():
     window._sequence_undo_stacks = {item.id: app_module.QUndoStack(window) for item in manager.sequences}
     window.refresh_sequence_tabs(); window.restore_active_sequence()
 
-    worker = app_module.Worker(lambda progress, log: (time.sleep(2.0) or ["synthetic.mp4"]))
-    window.export_worker = worker; window._retain_worker(worker); worker.start()
     heartbeat = [0]
     timer = QTimer(); timer.setInterval(50); timer.timeout.connect(lambda: heartbeat.__setitem__(0, heartbeat[0] + 1)); timer.start()
-    order = [simple.id, rich.id, timeline.id, rich.id] * 3
-    for index, sequence_id in enumerate(order):
-        QTimer.singleShot(80 + index * 120, lambda sid=sequence_id: window._sequence_tab_changed(sid))
-    QTimer.singleShot(2600, qt.quit)
+    # First exercise narration/no-narration replacement without Export.
+    before_export = [timeline.id, simple.id, rich.id, timeline.id, rich.id] * 4
+    for index, sequence_id in enumerate(before_export):
+        QTimer.singleShot(60 + index * 45, lambda sid=sequence_id: window._sequence_tab_changed(sid))
+
+    def start_export_switches():
+        worker = app_module.Worker(lambda progress, log: (time.sleep(1.8) or ["synthetic.mp4"]))
+        window.export_worker = worker; window._retain_worker(worker); worker.start()
+        during_export = [rich.id, timeline.id, simple.id, rich.id] * 3
+        for index, sequence_id in enumerate(during_export):
+            QTimer.singleShot(index * 65, lambda sid=sequence_id: window._sequence_tab_changed(sid))
+
+    QTimer.singleShot(1100, start_export_switches)
+    QTimer.singleShot(3300, qt.quit)
     qt.exec()
     app_module.ffm.extract_preview_still = original_extract
-    if heartbeat[0] < 35:
+    if heartbeat[0] < 50:
         raise AssertionError(f"GUI heartbeat stalled: {heartbeat[0]}")
     if window.sequence_manager.active_sequence_id != rich.id:
         raise AssertionError("Final rich sequence was not active")
