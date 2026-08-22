@@ -79,6 +79,14 @@ VERSION = "v1.1.0 PRO FOUNDATION"
 ROOT = Path(__file__).resolve().parent
 
 
+def font_family_for_combo(family, fallback_point_size=10):
+    """Build a family-selection font without passing Qt an invalid point size."""
+    font = QFont(str(family or "Arial"))
+    if font.pointSize() <= 0 and fallback_point_size > 0:
+        font.setPointSize(fallback_point_size)
+    return font
+
+
 AI_STYLE_LIBRARY = {
     "Factory documentary": "Phim tài liệu nhà máy — rõ ràng, chuyên nghiệp, tập trung quy trình.",
     "Fast viral explainer": "Giải thích nhanh kiểu viral — hook mạnh, nhịp nhanh, dễ giữ người xem.",
@@ -984,7 +992,7 @@ class MainWindow(QMainWindow):
         elif selection.kind == "subtitle":
             mapping = {
                 "font_size": (self.sub_size, lambda v: int(v)),
-                "font_name": (self.sub_font, lambda v: QFont(str(v))),
+                "font_name": (self.sub_font, font_family_for_combo),
                 "bold": (self.sub_bold, bool),
                 "italic": (self.sub_italic, bool),
                 "color": (self.sub_color, str),
@@ -3583,7 +3591,7 @@ class MainWindow(QMainWindow):
                     float(layer.get("font_size", 52))
                 )
                 self.editor_layer_font.setCurrentFont(
-                    QFont(str(layer.get("font_name", "Arial") or "Arial"))
+                    font_family_for_combo(layer.get("font_name", "Arial"))
                 )
                 self.editor_layer_color.setText(
                     str(layer.get("color", "#FFFFFF") or "#FFFFFF")
@@ -4498,11 +4506,11 @@ class MainWindow(QMainWindow):
         last = self.last_used_preferences.values
         if last:
             restorers = (
-                lambda: self.editor_layer_font.setCurrentFont(QFont(safe_str(last.get("text_font"), self.editor_layer_font.currentFont().family()))),
+                lambda: self.editor_layer_font.setCurrentFont(font_family_for_combo(safe_str(last.get("text_font"), self.editor_layer_font.currentFont().family()))),
                 lambda: self.editor_layer_size.setValue(safe_float(last.get("text_font_size"), self.editor_layer_size.value())),
                 lambda: self.editor_layer_color.setText(safe_str(last.get("text_color"), self.editor_layer_color.text())),
                 lambda: self.sub_preset.setCurrentText(safe_str(last.get("subtitle_preset"), self.sub_preset.currentText())),
-                lambda: self.sub_font.setCurrentFont(QFont(safe_str(last.get("subtitle_font"), self.sub_font.currentFont().family()))),
+                lambda: self.sub_font.setCurrentFont(font_family_for_combo(safe_str(last.get("subtitle_font"), self.sub_font.currentFont().family()))),
                 lambda: self.sub_size.setValue(safe_int(last.get("subtitle_size"), self.sub_size.value())),
                 lambda: self.sub_bold.setChecked(safe_bool(last.get("subtitle_bold"), self.sub_bold.isChecked())),
                 lambda: self.sub_italic.setChecked(safe_bool(last.get("subtitle_italic"), self.sub_italic.isChecked())),
@@ -7394,8 +7402,7 @@ class MainWindow(QMainWindow):
         self.sub_preset.blockSignals(True)
         self.sub_preset.setCurrentText(style.preset_name)
         self.sub_preset.blockSignals(False)
-        _family_font = QFont(style.font_name)
-        _family_font.setPointSize(10)
+        _family_font = font_family_for_combo(style.font_name)
         self.sub_font.setCurrentFont(_family_font)
         self.sub_size.setValue(style.font_size)
         self.sub_color.setText(style.primary_color)
@@ -8046,7 +8053,7 @@ class MainWindow(QMainWindow):
         if "overlay_text" in data:
             self.overlay_text.setText(str(data["overlay_text"] or ""))
         if "overlay_font" in data:
-            self.overlay_font.setCurrentFont(QFont(str(data["overlay_font"] or "Arial")))
+            self.overlay_font.setCurrentFont(font_family_for_combo(data["overlay_font"]))
         if "overlay_color" in data:
             self.overlay_color.setText(str(data["overlay_color"] or "#FFFFFF"))
         if "music_file" in data:

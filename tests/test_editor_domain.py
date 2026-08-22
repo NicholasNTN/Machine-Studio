@@ -67,6 +67,21 @@ class EditorDomainTests(unittest.TestCase):
         resolver = next(node for node in calls if getattr(node.func, "id", "") == "resolve_export_narration")
         self.assertEqual(len(resolver.args), 2)
 
+    def test_font_combo_callers_use_guarded_family_fonts(self):
+        tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        combo_calls = [node for node in calls if isinstance(node.func, ast.Attribute)
+                       and node.func.attr == "setCurrentFont"]
+        self.assertGreater(len(combo_calls), 0)
+        self.assertTrue(all(not (call.args and isinstance(call.args[0], ast.Call)
+                                and getattr(call.args[0].func, "id", "") == "QFont")
+                            for call in combo_calls))
+        helper = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+                      and node.name == "font_family_for_combo")
+        set_sizes = [node for node in ast.walk(helper) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Attribute) and node.func.attr == "setPointSize"]
+        self.assertEqual(len(set_sizes), 1)
+
     def test_processed_preview_result_is_cached_without_cross_timeline_display(self):
         manager = SequenceManager(); first = manager.active; second = manager.create()
         manager.activate(second.id)
